@@ -22,7 +22,12 @@ jobs:
 
       - name: Build EXE
         run: |
-          pyinstaller --onefile --add-data "constants.py;." --add-data "core.py;." --add-data "app.py;." --name SPC_Dashboard launcher.py
+          pyinstaller --onefile `
+            --add-data "constants.py;." `
+            --add-data "core.py;." `
+            --add-data "app.py;." `
+            --hidden-import streamlit.web.cli `
+            --name SPC_Dashboard launcher.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
