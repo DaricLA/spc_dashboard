@@ -24,7 +24,7 @@ jobs:
 
       - name: Build EXE with PyInstaller
         run: |
-          pyinstaller --onedir --name "SPC_Dashboard" `
+          pyinstaller --onedir --windowed --name "SPC_Dashboard" `
             --add-data "app.py;." `
             --add-data "core.py;." `
             --add-data "constants.py;." `
@@ -134,6 +134,9 @@ jobs:
             --hidden-import "packaging._musllinux" `
             --hidden-import "packaging._manylinux" `
             --hidden-import "packaging._structures" `
+            --hidden-import "webview" `
+            --hidden-import "webview.http" `
+            --hidden-import "clr" `
             --exclude-module "unittest" `
             --exclude-module "doctest" `
             --exclude-module "pdb" `
