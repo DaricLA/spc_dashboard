@@ -1,69 +1,98 @@
 """
-桌面启动器：稳定启动 Streamlit，捕获异常并保持窗口。
+launcher.py - EXE Entry Point
+Launches Streamlit server and opens browser automatically.
 """
+
+import subprocess
 import sys
 import os
-import threading
-import webbrowser
 import time
-import traceback
-import tempfile
+import webbrowser
+import socket
+from pathlib import Path
+
+
+def find_free_port(start_port=8501, max_port=8600):
+    """Find an available port."""
+    for port in range(start_port, max_port):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            if s.connect_ex(('localhost', port)) != 0:
+                return port
+    return start_port
+
 
 def main():
-    # 打包后的资源路径
+    """Main entry point for the EXE."""
+    # Get the directory where this script/exe is located
     if getattr(sys, 'frozen', False):
-        base_path = sys._MEIPASS
-        if base_path not in sys.path:
-            sys.path.insert(0, base_path)
+        # Running as compiled EXE
+        base_dir = Path(sys.executable).parent
     else:
-        base_path = os.path.dirname(os.path.abspath(__file__))
+        # Running as script
+        base_dir = Path(__file__).parent
 
-    # 确保 app.py 存在
-    app_script = os.path.join(base_path, 'app.py')
-    if not os.path.exists(app_script):
-        msg = f"错误：未找到 app.py，路径：{app_script}"
-        _show_error(msg)
-        return
+    app_path = base_dir / "app.py"
 
-    # 启动浏览器的线程
-    def open_browser():
-        time.sleep(3)
-        webbrowser.open("http://localhost:8501")
+    if not app_path.exists():
+        print(f"Error: app.py not found at {app_path}")
+        input("Press Enter to exit...")
+        sys.exit(1)
 
-    threading.Thread(target=open_browser, daemon=True).start()
+    port = find_free_port()
+    url = f"http://localhost:{port}"
+
+    print("=" * 50)
+    print("  SPC 控制图仪表盘")
+    print("=" * 50)
+    print(f"Starting Streamlit server on port {port}...")
+    print(f"Opening browser at {url}")
+    print("=" * 50)
+
+    # Start Streamlit in a subprocess
+    cmd = [
+        sys.executable, "-m", "streamlit", "run",
+        str(app_path),
+        "--server.port", str(port),
+        "--server.headless", "true",
+        "--browser.gatherUsageStats", "false",
+        "--server.enableCORS", "false",
+        "--server.enableXsrfProtection", "false"
+    ]
+
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=str(base_dir)
+    )
+
+    # Wait for server to start
+    time.sleep(3)
+
+    # Open browser
+    try:
+        webbrowser.open(url)
+    except Exception as e:
+        print(f"Could not open browser automatically: {e}")
+        print(f"Please manually open: {url}")
+
+    print("\nServer is running. Press Ctrl+C to stop.\n")
 
     try:
-        # 使用 bootstrap 直接运行，避免 CLI 子进程
-        from streamlit.web.bootstrap import run
-        run(app_script, '', [], flag_options={})
-    except Exception:
-        error_msg = traceback.format_exc()
-        _show_error(f"Streamlit 启动失败:\n{error_msg}")
+        # Keep the main process alive
+        while True:
+            time.sleep(1)
+            # Check if subprocess is still running
+            if process.poll() is not None:
+                print("\nStreamlit server has stopped.")
+                break
+    except KeyboardInterrupt:
+        print("\nShutting down...")
+        process.terminate()
+        process.wait(timeout=5)
+        print("Server stopped.")
 
-def _show_error(message):
-    """在无 GUI 环境下用多种方式展示错误"""
-    # 写入临时文件，便于查看
-    try:
-        log_path = os.path.join(tempfile.gettempdir(), "spc_dashboard_error.log")
-        with open(log_path, "w", encoding="utf-8") as f:
-            f.write(message)
-    except:
-        pass
-
-    # 尝试弹出控制台消息（如果可用）
-    try:
-        # 使用 tkinter 弹窗（需打包时包含 tkinter，但不强求）
-        import tkinter as tk
-        from tkinter import messagebox
-        root = tk.Tk()
-        root.withdraw()
-        messagebox.showerror("SPC Dashboard 启动错误", message)
-        root.destroy()
-    except Exception:
-        # 最后退化为控制台输出并暂停
-        print(message)
-        print("\n按回车键退出...")
-        input()
 
 if __name__ == "__main__":
     main()
