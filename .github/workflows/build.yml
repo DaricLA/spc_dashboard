@@ -9,7 +9,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Set up Python
+      - name: Set up Python 3.10
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
@@ -20,16 +20,18 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Build EXE
+      - name: Build EXE with PyInstaller
         run: |
           pyinstaller --onefile `
             --add-data "constants.py;." `
             --add-data "core.py;." `
             --add-data "app.py;." `
-            --hidden-import streamlit.web.cli `
+            --hidden-import streamlit `
+            --hidden-import streamlit.web.bootstrap `
+            --hidden-import streamlit.runtime `
             --name SPC_Dashboard launcher.py
 
-      - name: Upload artifact
+      - name: Upload EXE artifact
         uses: actions/upload-artifact@v4
         with:
           name: SPC_Dashboard_EXE
