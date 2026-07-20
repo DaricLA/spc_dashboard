@@ -1,20 +1,19 @@
 """
-launcher.py - EXE Entry Point
-Fixed for offline/enterprise environments with proxy/firewall.
+launcher.py - PyWebView 桌面應用入口
+內嵌瀏覽器窗口，無需外部瀏覽器，無 CMD 窗口停留
 """
 
 import subprocess
 import sys
 import os
 import time
-import webbrowser
 import socket
-import urllib.request
+import threading
+import webview
 from pathlib import Path
 
 
 def find_free_port(start_port=8501, max_port=9000):
-    """Find an available port."""
     for port in range(start_port, max_port):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             if s.connect_ex(('127.0.0.1', port)) != 0:
@@ -22,45 +21,8 @@ def find_free_port(start_port=8501, max_port=9000):
     return start_port
 
 
-def wait_for_server(url, timeout=30):
-    """Wait until Streamlit server is actually responding."""
-    start = time.time()
-    while time.time() - start < timeout:
-        try:
-            test_url = url.replace("localhost", "127.0.0.1")
-            req = urllib.request.Request(test_url, method='HEAD')
-            req.add_header('User-Agent', 'Mozilla/5.0')
-            with urllib.request.urlopen(req, timeout=2) as response:
-                if response.status == 200:
-                    return True
-        except Exception:
-            pass
-        time.sleep(0.5)
-    return False
-
-
-def main():
-    if getattr(sys, 'frozen', False):
-        base_dir = Path(sys.executable).parent
-    else:
-        base_dir = Path(__file__).parent
-
-    app_path = base_dir / "app.py"
-    if not app_path.exists():
-        print(f"Error: app.py not found at {app_path}")
-        input("Press Enter to exit...")
-        sys.exit(1)
-
-    port = find_free_port()
-    url = f"http://127.0.0.1:{port}"
-
-    print("=" * 55)
-    print("  SPC 控制图仪表盘")
-    print("=" * 55)
-    print(f"Starting server on {url} ...")
-    print("(This may take 10-20 seconds on first run)")
-    print("=" * 55)
-
+def start_streamlit(app_path, port, base_dir):
+    """在後台線程啟動 Streamlit，完全隱藏控制台"""
     env = os.environ.copy()
     env['NO_PROXY'] = '127.0.0.1,localhost'
     env['no_proxy'] = '127.0.0.1,localhost'
@@ -80,8 +42,9 @@ def main():
 
     startupinfo = subprocess.STARTUPINFO()
     startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = subprocess.SW_HIDE
 
-    process = subprocess.Popen(
+    return subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -91,38 +54,68 @@ def main():
         startupinfo=startupinfo
     )
 
-    print("Waiting for server to start...", end="", flush=True)
-    if wait_for_server(url, timeout=30):
-        print(" OK!")
-        print(f"\nOpening browser: {url}")
+
+def wait_for_server(port, timeout=30):
+    url = f"http://127.0.0.1:{port}"
+    start = time.time()
+    while time.time() - start < timeout:
         try:
-            webbrowser.open(url, new=2)
-        except Exception as e:
-            print(f"Could not open browser: {e}")
-            print(f"Please manually open: {url}")
+            import urllib.request
+            req = urllib.request.Request(url, method='HEAD')
+            req.add_header('User-Agent', 'Mozilla/5.0')
+            with urllib.request.urlopen(req, timeout=2) as response:
+                if response.status == 200:
+                    return True
+        except Exception:
+            pass
+        time.sleep(0.5)
+    return False
+
+
+def main():
+    if getattr(sys, 'frozen', False):
+        base_dir = Path(sys.executable).parent
     else:
-        print(" TIMEOUT!")
-        print(f"\nPlease manually open: {url}")
+        base_dir = Path(__file__).parent
 
-    print("\n" + "=" * 55)
-    print("Server is running. Close this window to stop.")
-    print("=" * 55)
+    app_path = base_dir / "app.py"
+    if not app_path.exists():
+        webview.create_window(
+            '錯誤',
+            html='<h1>錯誤：找不到 app.py</h1><p>請確保 app.py 與程式在同一目錄</p>',
+            width=400, height=200
+        )
+        webview.start()
+        sys.exit(1)
 
+    port = find_free_port()
+    process = start_streamlit(app_path, port, base_dir)
+
+    if not wait_for_server(port, timeout=30):
+        stderr = process.stderr.read(2000) if process.stderr else "無錯誤輸出"
+        webview.create_window(
+            '啟動失敗',
+            html=f'<h1>啟動失敗</h1><p>無法啟動分析引擎，請檢查依賴是否完整安裝</p><pre>{stderr}</pre>',
+            width=600, height=400
+        )
+        webview.start()
+        sys.exit(1)
+
+    window = webview.create_window(
+        'SPC 控制图仪表盘',
+        f'http://127.0.0.1:{port}',
+        width=1400,
+        height=900,
+        min_size=(1200, 700)
+    )
+
+    webview.start(debug=False)
+
+    process.terminate()
     try:
-        while True:
-            time.sleep(1)
-            if process.poll() is not None:
-                print("\nStreamlit server has stopped.")
-                break
-    except KeyboardInterrupt:
-        print("\nShutting down...")
-    finally:
-        process.terminate()
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-        print("Server stopped.")
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
 
 
 if __name__ == "__main__":
