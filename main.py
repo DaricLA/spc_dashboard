@@ -1,5 +1,8 @@
 """
 SPC 报告生成器 - 桌面入口 (tkinter)
+- 界面预设输出路径，无需每次选择
+- 支持仅合并 CSV 文件
+- 窗口自适应
 """
 import tkinter as tk
 from tkinter import filedialog, ttk, messagebox
@@ -17,64 +20,126 @@ class Application(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("SPC 分析报告生成器")
-        self.geometry("700x650")
+        self.geometry("900x700")
+        self.minsize(800, 600)
         self.resizable(True, True)
 
-        # 文件列表与表头行号
         self.file_paths = []
-        self.header_rows = []      # 对应每个文件的表头行号
-        self.file_frames = []      # 每个文件的 UI 框架
+        self.header_rows = []
+        self.output_dir = tk.StringVar()   # 输出目录
 
-        # 界面布局
         self.create_widgets()
 
     def create_widgets(self):
-        # 顶部：文件选择
-        btn_frame = tk.Frame(self)
-        btn_frame.pack(fill=tk.X, padx=10, pady=5)
-        tk.Button(btn_frame, text="选择 CSV 文件", command=self.select_files).pack(side=tk.LEFT)
-        self.lbl_count = tk.Label(btn_frame, text="未选择文件")
+        # 顶部按钮区
+        top_frame = tk.Frame(self)
+        top_frame.pack(fill=tk.X, padx=10, pady=5)
+        tk.Button(top_frame, text="选择 CSV 文件", command=self.select_files, height=1).pack(side=tk.LEFT)
+        self.lbl_count = tk.Label(top_frame, text="未选择文件")
         self.lbl_count.pack(side=tk.LEFT, padx=10)
+        self.btn_merge = tk.Button(top_frame, text="仅合并文件", command=self.merge_only, state="disabled",
+                                   bg="#3498db", fg="white", height=1)
+        self.btn_merge.pack(side=tk.RIGHT, padx=5)
 
-        # 文件列表容器（带滚动条）
-        self.canvas = tk.Canvas(self, borderwidth=0, height=150)
-        self.scrollbar = tk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        # 输出目录选择（新增）
+        out_frame = tk.Frame(self)
+        out_frame.pack(fill=tk.X, padx=10, pady=5)
+        tk.Label(out_frame, text="输出目录:").pack(side=tk.LEFT)
+        tk.Entry(out_frame, textvariable=self.output_dir, width=50).pack(side=tk.LEFT, padx=5)
+        tk.Button(out_frame, text="浏览...", command=self.browse_output_dir).pack(side=tk.LEFT)
+
+        # 可滚动的文件列表区域
+        list_container = tk.Frame(self)
+        list_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        self.canvas = tk.Canvas(list_container, borderwidth=0)
+        self.scrollbar = tk.Scrollbar(list_container, orient="vertical", command=self.canvas.yview)
         self.scrollable_frame = tk.Frame(self.canvas)
         self.scrollable_frame.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
         self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
-        self.canvas.pack(side="left", fill="both", expand=True, padx=10, pady=5)
-        self.scrollbar.pack(side="right", fill="y")
+        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # 列映射区
-        map_frame = tk.LabelFrame(self, text="字段映射（基于第一个文件）")
-        map_frame.pack(fill=tk.X, padx=10, pady=5)
-        self.map_frame = map_frame
-        self.create_mapping_widgets(map_frame)
+        # 映射 & 预处理区域
+        self.create_mapping_section()
+        self.create_preprocess_section()
+        self.create_analysis_section()
 
-        # 预处理选项
-        pre_frame = tk.LabelFrame(self, text="预处理选项")
-        pre_frame.pack(fill=tk.X, padx=10, pady=5)
+        # 生成按钮
+        self.btn_generate = tk.Button(self, text="生成 HTML 报告", command=self.start_analysis,
+                                      bg="#2ecc71", fg="white", height=2, state="disabled")
+        self.btn_generate.pack(pady=10)
+        self.status = tk.Label(self, text="", fg="blue")
+        self.status.pack()
+
+    def create_mapping_section(self):
+        frame = tk.LabelFrame(self, text="字段映射（基于第一个文件）")
+        frame.pack(fill=tk.X, padx=10, pady=5)
+        self.lbl_sid = tk.Label(frame, text="样本ID列:")
+        self.lbl_sid.grid(row=0, column=0, sticky="e", padx=5, pady=2)
+        self.combo_sid = ttk.Combobox(frame, state="readonly", width=15)
+        self.combo_sid.grid(row=0, column=1, sticky="w", padx=5, pady=2)
+        self.lbl_grp = tk.Label(frame, text="分组列:")
+        self.lbl_grp.grid(row=0, column=2, sticky="e", padx=5, pady=2)
+        self.combo_grp = ttk.Combobox(frame, state="readonly", width=15)
+        self.combo_grp.grid(row=0, column=3, sticky="w", padx=5, pady=2)
+        self.lbl_val = tk.Label(frame, text="数值列:")
+        self.lbl_val.grid(row=0, column=4, sticky="e", padx=5, pady=2)
+        self.combo_val = ttk.Combobox(frame, state="readonly", width=15)
+        self.combo_val.grid(row=0, column=5, sticky="w", padx=5, pady=2)
+
+        # 规格限
+        self.lbl_usl = tk.Label(frame, text="USL 来源:")
+        self.lbl_usl.grid(row=1, column=0, sticky="e", padx=5, pady=2)
+        self.usl_choice = tk.StringVar(value="手动")
+        tk.Radiobutton(frame, text="从列选", variable=self.usl_choice, value="列", command=self.toggle_spec).grid(row=1, column=1, sticky="w")
+        tk.Radiobutton(frame, text="手动输入", variable=self.usl_choice, value="手动", command=self.toggle_spec).grid(row=1, column=2, sticky="w")
+        self.combo_usl_col = ttk.Combobox(frame, state="readonly", width=10)
+        self.combo_usl_col.grid(row=1, column=3, sticky="w", padx=5)
+        self.entry_usl_val = tk.Entry(frame, width=8)
+        self.entry_usl_val.grid(row=1, column=4, sticky="w", padx=5)
+
+        self.lbl_lsl = tk.Label(frame, text="LSL 来源:")
+        self.lbl_lsl.grid(row=2, column=0, sticky="e", padx=5, pady=2)
+        self.lsl_choice = tk.StringVar(value="手动")
+        tk.Radiobutton(frame, text="从列选", variable=self.lsl_choice, value="列", command=self.toggle_spec).grid(row=2, column=1, sticky="w")
+        tk.Radiobutton(frame, text="手动输入", variable=self.lsl_choice, value="手动", command=self.toggle_spec).grid(row=2, column=2, sticky="w")
+        self.combo_lsl_col = ttk.Combobox(frame, state="readonly", width=10)
+        self.combo_lsl_col.grid(row=2, column=3, sticky="w", padx=5)
+        self.entry_lsl_val = tk.Entry(frame, width=8)
+        self.entry_lsl_val.grid(row=2, column=4, sticky="w", padx=5)
+
+        # 参考线
+        tk.Label(frame, text="参考上限:").grid(row=3, column=0, sticky="e", padx=5, pady=2)
+        self.entry_ref_upper = tk.Entry(frame, width=8)
+        self.entry_ref_upper.grid(row=3, column=1, sticky="w", padx=5)
+        tk.Label(frame, text="参考下限:").grid(row=3, column=2, sticky="e", padx=5)
+        self.entry_ref_lower = tk.Entry(frame, width=8)
+        self.entry_ref_lower.grid(row=3, column=3, sticky="w", padx=5)
+
+    def create_preprocess_section(self):
+        frame = tk.LabelFrame(self, text="预处理选项")
+        frame.pack(fill=tk.X, padx=10, pady=5)
         self.var_delete_empty = tk.BooleanVar(value=True)
         self.var_delete_dups = tk.BooleanVar(value=True)
         self.var_fill_na = tk.StringVar(value="不处理")
         self.var_outlier_sigma = tk.DoubleVar(value=0.0)
-        tk.Checkbutton(pre_frame, text="删除全空行", variable=self.var_delete_empty).grid(row=0, column=0, sticky="w")
-        tk.Checkbutton(pre_frame, text="删除重复样本ID行", variable=self.var_delete_dups).grid(row=0, column=1, sticky="w")
-        tk.Label(pre_frame, text="缺失值填充:").grid(row=1, column=0, sticky="e")
-        ttk.Combobox(pre_frame, textvariable=self.var_fill_na, values=["不处理", "均值", "中位数", "删除该行"], width=8).grid(row=1, column=1, sticky="w")
-        tk.Label(pre_frame, text="异常值过滤（±σ倍数，0=不过滤）:").grid(row=2, column=0, sticky="e")
-        tk.Entry(pre_frame, textvariable=self.var_outlier_sigma, width=5).grid(row=2, column=1, sticky="w")
+        tk.Checkbutton(frame, text="删除全空行", variable=self.var_delete_empty).grid(row=0, column=0, sticky="w")
+        tk.Checkbutton(frame, text="删除重复样本ID行", variable=self.var_delete_dups).grid(row=0, column=1, sticky="w")
+        tk.Label(frame, text="缺失值填充:").grid(row=0, column=2, sticky="e")
+        ttk.Combobox(frame, textvariable=self.var_fill_na, values=["不处理", "均值", "中位数", "删除该行"], width=8).grid(row=0, column=3, sticky="w")
+        tk.Label(frame, text="异常值过滤（±σ倍数，0=不过滤）:").grid(row=0, column=4, sticky="e")
+        tk.Entry(frame, textvariable=self.var_outlier_sigma, width=5).grid(row=0, column=5, sticky="w")
 
-        # 控制图与规则
-        ctl_frame = tk.LabelFrame(self, text="控制图与判异规则")
-        ctl_frame.pack(fill=tk.X, padx=10, pady=5)
+    def create_analysis_section(self):
+        frame = tk.LabelFrame(self, text="控制图与判异规则")
+        frame.pack(fill=tk.X, padx=10, pady=5)
         self.var_chart_type = tk.StringVar(value="auto")
-        tk.Radiobutton(ctl_frame, text="自动（等子组X-R，否则X-S）", variable=self.var_chart_type, value="auto").grid(row=0, column=0, sticky="w")
-        tk.Radiobutton(ctl_frame, text="强制 X-R", variable=self.var_chart_type, value="X-R").grid(row=0, column=1, sticky="w")
-        tk.Radiobutton(ctl_frame, text="强制 X-S", variable=self.var_chart_type, value="X-S").grid(row=0, column=2, sticky="w")
+        tk.Radiobutton(frame, text="自动（等子组X-R，否则X-S）", variable=self.var_chart_type, value="auto").grid(row=0, column=0, sticky="w")
+        tk.Radiobutton(frame, text="强制 X-R", variable=self.var_chart_type, value="X-R").grid(row=0, column=1, sticky="w")
+        tk.Radiobutton(frame, text="强制 X-S", variable=self.var_chart_type, value="X-S").grid(row=0, column=2, sticky="w")
 
-        rule_frame = tk.Frame(ctl_frame)
+        rule_frame = tk.Frame(frame)
         rule_frame.grid(row=1, column=0, columnspan=3, sticky="w")
         self.rule_vars = {}
         rules_text = [
@@ -90,75 +155,26 @@ class Application(tk.Tk):
         for i, (key, text) in enumerate(rules_text):
             var = tk.BooleanVar(value=(key == "rule1"))
             self.rule_vars[key] = var
-            tk.Checkbutton(rule_frame, text=text, variable=var).grid(row=i//2, column=i%2, sticky="w")
+            tk.Checkbutton(rule_frame, text=text, variable=var).grid(row=i//4, column=i%4, sticky="w")
 
-        # 生成按钮
-        self.btn_generate = tk.Button(self, text="生成 HTML 报告", command=self.start_analysis, bg="#2ecc71", fg="white", height=2)
-        self.btn_generate.pack(pady=15)
-        self.status = tk.Label(self, text="", fg="blue")
-        self.status.pack()
-
-    def create_mapping_widgets(self, parent):
-        # 需在选中文件后动态填充列名，这里先占位
-        self.lbl_sid = tk.Label(parent, text="样本ID列:")
-        self.lbl_sid.grid(row=0, column=0, sticky="e")
-        self.combo_sid = ttk.Combobox(parent, state="readonly", width=15)
-        self.combo_sid.grid(row=0, column=1, sticky="w")
-
-        self.lbl_grp = tk.Label(parent, text="分组列:")
-        self.lbl_grp.grid(row=0, column=2, sticky="e")
-        self.combo_grp = ttk.Combobox(parent, state="readonly", width=15)
-        self.combo_grp.grid(row=0, column=3, sticky="w")
-
-        self.lbl_val = tk.Label(parent, text="数值列:")
-        self.lbl_val.grid(row=0, column=4, sticky="e")
-        self.combo_val = ttk.Combobox(parent, state="readonly", width=15)
-        self.combo_val.grid(row=0, column=5, sticky="w")
-
-        # 规格限来源
-        self.lbl_usl = tk.Label(parent, text="规格上限(USL):")
-        self.lbl_usl.grid(row=1, column=0, sticky="e")
-        self.usl_choice = tk.StringVar(value="手动")
-        tk.Radiobutton(parent, text="从列选", variable=self.usl_choice, value="列").grid(row=1, column=1, sticky="w")
-        tk.Radiobutton(parent, text="手动输入", variable=self.usl_choice, value="手动").grid(row=1, column=2, sticky="w")
-        self.combo_usl_col = ttk.Combobox(parent, state="readonly", width=10)
-        self.combo_usl_col.grid(row=1, column=3, sticky="w")
-        self.entry_usl_val = tk.Entry(parent, width=8)
-        self.entry_usl_val.grid(row=1, column=4, sticky="w")
-        self.usl_choice.trace_add("write", lambda *args: self.toggle_spec_entry())
-
-        self.lbl_lsl = tk.Label(parent, text="规格下限(LSL):")
-        self.lbl_lsl.grid(row=2, column=0, sticky="e")
-        self.lsl_choice = tk.StringVar(value="手动")
-        tk.Radiobutton(parent, text="从列选", variable=self.lsl_choice, value="列").grid(row=2, column=1, sticky="w")
-        tk.Radiobutton(parent, text="手动输入", variable=self.lsl_choice, value="手动").grid(row=2, column=2, sticky="w")
-        self.combo_lsl_col = ttk.Combobox(parent, state="readonly", width=10)
-        self.combo_lsl_col.grid(row=2, column=3, sticky="w")
-        self.entry_lsl_val = tk.Entry(parent, width=8)
-        self.entry_lsl_val.grid(row=2, column=4, sticky="w")
-        self.lsl_choice.trace_add("write", lambda *args: self.toggle_spec_entry())
-
-        # 参考线（手动）
-        tk.Label(parent, text="参考上限:").grid(row=3, column=0, sticky="e")
-        self.entry_ref_upper = tk.Entry(parent, width=8)
-        self.entry_ref_upper.grid(row=3, column=1, sticky="w")
-        tk.Label(parent, text="参考下限:").grid(row=3, column=2, sticky="e")
-        self.entry_ref_lower = tk.Entry(parent, width=8)
-        self.entry_ref_lower.grid(row=3, column=3, sticky="w")
-
-    def toggle_spec_entry(self):
+    def toggle_spec(self):
         if self.usl_choice.get() == "列":
-            self.entry_usl_val.configure(state="disabled")
-            self.combo_usl_col.configure(state="readonly")
+            self.combo_usl_col.config(state="readonly")
+            self.entry_usl_val.config(state="disabled")
         else:
-            self.entry_usl_val.configure(state="normal")
-            self.combo_usl_col.configure(state="disabled")
+            self.combo_usl_col.config(state="disabled")
+            self.entry_usl_val.config(state="normal")
         if self.lsl_choice.get() == "列":
-            self.entry_lsl_val.configure(state="disabled")
-            self.combo_lsl_col.configure(state="readonly")
+            self.combo_lsl_col.config(state="readonly")
+            self.entry_lsl_val.config(state="disabled")
         else:
-            self.entry_lsl_val.configure(state="normal")
-            self.combo_lsl_col.configure(state="disabled")
+            self.combo_lsl_col.config(state="disabled")
+            self.entry_lsl_val.config(state="normal")
+
+    def browse_output_dir(self):
+        directory = filedialog.askdirectory(title="选择输出目录")
+        if directory:
+            self.output_dir.set(directory)
 
     def select_files(self):
         files = filedialog.askopenfilenames(filetypes=[("CSV files", "*.csv")])
@@ -166,9 +182,17 @@ class Application(tk.Tk):
             return
         self.file_paths = list(files)
         self.header_rows = [core.auto_detect_header(p) for p in self.file_paths]
-        self.refresh_file_list()
         self.lbl_count.config(text=f"已选 {len(files)} 个文件")
-        # 更新列映射下拉框（用第一个文件）
+        self.btn_merge.config(state="normal")
+        self.btn_generate.config(state="normal")
+        self.refresh_file_list()
+
+        # 设置输出目录为第一个文件所在目录（如果用户未手动设置）
+        if not self.output_dir.get() and self.file_paths:
+            default_dir = os.path.dirname(self.file_paths[0])
+            self.output_dir.set(default_dir)
+
+        # 更新映射下拉框
         if self.file_paths:
             try:
                 first_df = pd.read_csv(self.file_paths[0], skiprows=self.header_rows[0])
@@ -177,65 +201,52 @@ class Application(tk.Tk):
                     combo['values'] = cols
                     if cols:
                         combo.current(0)
+                self.toggle_spec()
             except Exception as e:
                 messagebox.showerror("错误", f"读取文件失败：{e}")
 
     def refresh_file_list(self):
         for widget in self.scrollable_frame.winfo_children():
             widget.destroy()
-        self.file_frames.clear()
         for i, (fpath, hrow) in enumerate(zip(self.file_paths, self.header_rows)):
             frame = tk.Frame(self.scrollable_frame)
             frame.pack(fill=tk.X, pady=2)
-            tk.Label(frame, text=os.path.basename(fpath), width=40, anchor="w").pack(side=tk.LEFT)
+            tk.Label(frame, text=os.path.basename(fpath), width=50, anchor="w").pack(side=tk.LEFT)
             tk.Label(frame, text="表头行(0起始):").pack(side=tk.LEFT)
             var = tk.IntVar(value=hrow)
             spin = tk.Spinbox(frame, from_=0, to=2, textvariable=var, width=3)
             spin.pack(side=tk.LEFT)
             spin.bind("<ButtonRelease-1>", lambda e, idx=i: self.update_header_row(idx, var.get()))
-            self.file_frames.append((fpath, var))
 
     def update_header_row(self, idx, new_val):
         self.header_rows[idx] = new_val
 
-    def start_analysis(self):
-        if not self.file_paths:
-            messagebox.showwarning("警告", "请先选择 CSV 文件")
-            return
-        # 获取映射配置
-        try:
-            sid = self.combo_sid.get()
-            grp = self.combo_grp.get()
-            val = self.combo_val.get()
-            if not sid or not grp or not val:
-                raise ValueError("字段映射不能为空")
-        except:
-            messagebox.showwarning("警告", "请完成字段映射")
-            return
-
-        # 规格限
+    def get_mapping(self):
+        sid = self.combo_sid.get()
+        grp = self.combo_grp.get()
+        val = self.combo_val.get()
+        if not sid or not grp or not val:
+            raise ValueError("请完成字段映射")
         usl = None
         if self.usl_choice.get() == "列":
-            usl = self.combo_usl_col.get()
+            usl = self.combo_usl_col.get() if self.combo_usl_col.get() != '' else None
         else:
             txt = self.entry_usl_val.get().strip()
             if txt:
                 try:
                     usl = float(txt)
                 except:
-                    messagebox.showwarning("警告", "USL 输入非法数字")
-                    return
+                    raise ValueError("USL 输入非法数字")
         lsl = None
         if self.lsl_choice.get() == "列":
-            lsl = self.combo_lsl_col.get()
+            lsl = self.combo_lsl_col.get() if self.combo_lsl_col.get() != '' else None
         else:
             txt = self.entry_lsl_val.get().strip()
             if txt:
                 try:
                     lsl = float(txt)
                 except:
-                    messagebox.showwarning("警告", "LSL 输入非法数字")
-                    return
+                    raise ValueError("LSL 输入非法数字")
         ref_upper = None
         txt = self.entry_ref_upper.get().strip()
         if txt:
@@ -250,8 +261,7 @@ class Application(tk.Tk):
                 ref_lower = float(txt)
             except:
                 pass
-
-        mapping = {
+        return {
             'sample_id': sid,
             'group': grp,
             'value': val,
@@ -261,19 +271,35 @@ class Application(tk.Tk):
             'ref_lower': ref_lower
         }
 
-        # 收集规则
-        rules = {k: v.get() for k, v in self.rule_vars.items()}
+    def start_analysis(self):
+        try:
+            mapping = self.get_mapping()
+        except Exception as e:
+            messagebox.showwarning("警告", str(e))
+            return
 
-        # 在后台线程运行分析，避免界面卡死
+        out_dir = self.output_dir.get().strip()
+        if not out_dir:
+            messagebox.showwarning("警告", "请先设置输出目录")
+            return
+        if not os.path.isdir(out_dir):
+            try:
+                os.makedirs(out_dir)
+            except:
+                messagebox.showwarning("警告", "输出目录无效，无法创建")
+                return
+
+        rules = {k: v.get() for k, v in self.rule_vars.items()}
+        out_path = os.path.join(out_dir, f"SPC_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html")
+
         self.status.config(text="正在分析，请稍候...")
         self.btn_generate.config(state="disabled")
-        threading.Thread(target=self.run_analysis, args=(mapping, rules), daemon=True).start()
+        self.btn_merge.config(state="disabled")
+        threading.Thread(target=self.run_analysis, args=(mapping, rules, out_path), daemon=True).start()
 
-    def run_analysis(self, mapping, rules):
+    def run_analysis(self, mapping, rules, out_path):
         try:
-            # 数据合并
             df, specs = core.process_data(self.file_paths, self.header_rows, mapping)
-            # 预处理
             df = core.preprocess_data(df,
                                       delete_empty=self.var_delete_empty.get(),
                                       delete_duplicates=self.var_delete_dups.get(),
@@ -281,35 +307,22 @@ class Application(tk.Tk):
                                       fill_na=self.var_fill_na.get())
             if len(df) == 0:
                 raise ValueError("预处理后数据为空")
-
-            # 子组统计
             subgroup_stats = core.subgroup_statistics(df, 'group', 'value')
             sizes = subgroup_stats['subgroup_size']
             equal_size = (sizes.nunique() == 1)
-
-            # 图类型
             chart_choice = self.var_chart_type.get()
             if chart_choice == "auto":
                 chart_type = "X-R" if equal_size else "X-S"
             else:
                 chart_type = chart_choice
             if chart_type == "X-R" and not equal_size:
-                chart_type = "X-S"  # 安全回退
+                chart_type = "X-S"
 
-            # 控制限
             cl = core.control_limits(subgroup_stats, chart_type)
-            # 违规检测
             marked = core.detect_violations(df, subgroup_stats, cl, chart_type, rules)
-            # 能力分析
             cap = core.process_capability(df, specs, subgroup_stats, chart_type)
 
-            # 生成报告
-            out_dir = os.path.dirname(self.file_paths[0])  # 保存到第一个文件同目录
-            out_name = f"SPC_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
-            out_path = os.path.join(out_dir, out_name)
             generate_html_report(out_path, df, subgroup_stats, cl, marked, cap, specs, chart_type)
-
-            # 打开报告
             webbrowser.open(f"file:///{out_path}")
             self.after(0, self.analysis_done, out_path)
         except Exception as e:
@@ -318,12 +331,60 @@ class Application(tk.Tk):
     def analysis_done(self, path):
         self.status.config(text=f"报告已生成：{path}")
         self.btn_generate.config(state="normal")
+        self.btn_merge.config(state="normal")
         messagebox.showinfo("完成", f"报告已保存并打开：\n{path}")
 
     def analysis_error(self, msg):
         self.status.config(text="分析失败")
         self.btn_generate.config(state="normal")
+        self.btn_merge.config(state="normal")
         messagebox.showerror("错误", f"分析过程出错：\n{msg}")
+
+    # ---------- 仅合并文件 ----------
+    def merge_only(self):
+        out_dir = self.output_dir.get().strip()
+        if not out_dir:
+            messagebox.showwarning("警告", "请先设置输出目录")
+            return
+        if not os.path.isdir(out_dir):
+            try:
+                os.makedirs(out_dir)
+            except:
+                messagebox.showwarning("警告", "输出目录无效，无法创建")
+                return
+
+        out_path = os.path.join(out_dir, f"merged_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
+        self.status.config(text="正在合并文件...")
+        self.btn_merge.config(state="disabled")
+        self.btn_generate.config(state="disabled")
+        threading.Thread(target=self.run_merge, args=(out_path,), daemon=True).start()
+
+    def run_merge(self, out_path):
+        try:
+            dfs = []
+            for f, hrow in zip(self.file_paths, self.header_rows):
+                df = pd.read_csv(f, skiprows=hrow)
+                df['_source_file'] = os.path.basename(f)
+                dfs.append(df)
+            merged = pd.concat(dfs, ignore_index=True)
+            if self.var_delete_empty.get():
+                merged = merged.dropna(how='all')
+            merged.to_csv(out_path, index=False, encoding='utf-8-sig')
+            self.after(0, self.merge_done, out_path)
+        except Exception as e:
+            self.after(0, self.merge_error, str(e))
+
+    def merge_done(self, path):
+        self.status.config(text=f"合并文件已保存：{path}")
+        self.btn_merge.config(state="normal")
+        self.btn_generate.config(state="normal")
+        messagebox.showinfo("完成", f"合并成功，文件已保存至：\n{path}")
+
+    def merge_error(self, msg):
+        self.status.config(text="合并失败")
+        self.btn_merge.config(state="normal")
+        self.btn_generate.config(state="normal")
+        messagebox.showerror("错误", f"合并过程出错：\n{msg}")
 
 if __name__ == "__main__":
     app = Application()
