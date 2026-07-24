@@ -1,22 +1,51 @@
 """
 核心统计：表头检测、数据合并、预处理、子组统计、控制限、判异、能力分析
+支持 CSV 和 Excel 文件，自动处理编码问题
 """
 import pandas as pd
 import numpy as np
+import os
 from constants import get_constants
 
+def _read_csv_robust(filepath, skiprows=0):
+    """
+    尝试多种编码读取 CSV，返回 DataFrame。
+    """
+    encodings = ['utf-8', 'gbk', 'gb2312', 'latin-1']
+    for enc in encodings:
+        try:
+            return pd.read_csv(filepath, skiprows=skiprows, encoding=enc)
+        except (UnicodeDecodeError, UnicodeError):
+            continue
+    # 如果全部失败，用 utf-8 并忽略错误
+    return pd.read_csv(filepath, skiprows=skiprows, encoding='utf-8', errors='replace')
+
 def auto_detect_header(filepath, max_rows=3):
-    """自动检测 CSV 表头所在行（0-based），返回最佳行号"""
+    """自动检测表头行号，支持 CSV 和 Excel"""
+    ext = os.path.splitext(filepath)[1].lower()
     best_row = 0
     best_score = 1.0
     for row in range(max_rows):
         try:
-            df = pd.read_csv(filepath, nrows=1, skiprows=row, header=None)
-            vals = df.iloc[0].dropna().values
-            if len(vals) == 0:
+            if ext == '.csv':
+                df = _read_csv_robust(filepath, skiprows=row)
+                if df.empty:
+                    continue
+                # 假设第一行为表头候选，检查该行是否更像标题
+                # 简化：直接检查读取后第一行各列的数据类型
+                row_vals = df.columns.tolist()
+            elif ext in ('.xlsx', '.xls'):
+                df = pd.read_excel(filepath, header=None, nrows=1, skiprows=row)
+                if df.empty:
+                    continue
+                row_vals = df.iloc[0].dropna().tolist()
+            else:
+                return 0
+
+            if not row_vals:
                 continue
-            num_count = sum(isinstance(x, (int, float)) for x in vals if not isinstance(x, bool))
-            ratio = num_count / len(vals)
+            num_count = sum(isinstance(x, (int, float)) for x in row_vals if not isinstance(x, bool))
+            ratio = num_count / len(row_vals)
             if ratio < 0.5 and ratio < best_score:
                 best_score = ratio
                 best_row = row
@@ -26,12 +55,22 @@ def auto_detect_header(filepath, max_rows=3):
 
 def process_data(files, header_rows, mapping_config):
     """
-    读取并合并 CSV 文件，返回合并后的 DataFrame 与规格字典。
-    支持规格限来自列名或直接数值。
+    读取并合并多个文件，支持 CSV 和 Excel。
+    files: 文件路径列表
+    header_rows: 每文件对应的表头行（0-based）
+    mapping_config: 字段映射字典
+    返回合并 DataFrame 和 specs 字典
     """
     dfs = []
     for f, hrow in zip(files, header_rows):
-        df = pd.read_csv(f, skiprows=hrow)
+        ext = os.path.splitext(f)[1].lower()
+        if ext == '.csv':
+            df = _read_csv_robust(f, skiprows=hrow)
+        elif ext in ('.xlsx', '.xls'):
+            # Excel 默认第一个 sheet
+            df = pd.read_excel(f, header=hrow)
+        else:
+            raise ValueError(f"不支持的文件格式: {ext}")
         df['_file_source'] = f
         dfs.append(df)
     combined = pd.concat(dfs, ignore_index=True)
@@ -49,15 +88,12 @@ def process_data(files, header_rows, mapping_config):
     def _get_spec(val):
         if val is None:
             return None
-        # 如果已经是数字
         if isinstance(val, (int, float)):
             return float(val)
-        # 如果是字符串，先尝试转为数字
         if isinstance(val, str):
             try:
                 return float(val)
             except ValueError:
-                # 不是数字，则作为列名从数据中提取第一个有效值
                 if val in combined.columns:
                     s = combined[val].dropna()
                     if len(s) > 0:
@@ -73,7 +109,6 @@ def process_data(files, header_rows, mapping_config):
     return combined, specs
 
 def preprocess_data(df, delete_empty=True, delete_duplicates=True, outlier_sigma=None, fill_na='不处理'):
-    """执行数据清洗，返回清洗后DataFrame"""
     if delete_empty:
         df = df.dropna(how='all')
     if delete_duplicates:
@@ -94,7 +129,6 @@ def preprocess_data(df, delete_empty=True, delete_duplicates=True, outlier_sigma
     return df
 
 def subgroup_statistics(df, group_col='group', value_col='value'):
-    """计算每个子组的均值、标准差、大小、极差"""
     grouped = df.groupby(group_col)
     stats = grouped[value_col].agg(['mean', 'std', 'count', 'min', 'max'])
     stats['range'] = stats['max'] - stats['min']
@@ -109,18 +143,12 @@ def subgroup_statistics(df, group_col='group', value_col='value'):
     return stats
 
 def control_limits(subgroup_stats, chart_type='X-S'):
-    """
-    根据子组统计量计算控制限。
-    返回字典: {'X': {'CL','UCL','LCL'}, 'R'或'S': {...}}
-    """
     n_avg = int(round(subgroup_stats['subgroup_size'].mean()))
     const = get_constants(n_avg)
-
     total_n = subgroup_stats['subgroup_size'].sum()
     overall_mean = (subgroup_stats['subgroup_mean'] * subgroup_stats['subgroup_size']).sum() / total_n
 
     if chart_type == 'X-R':
-        # 加权平均极差
         R_bar = (subgroup_stats['subgroup_range'] * subgroup_stats['subgroup_size']).sum() / total_n
         X_cl = overall_mean
         X_ucl = X_cl + const['A2'] * R_bar
@@ -128,12 +156,9 @@ def control_limits(subgroup_stats, chart_type='X-S'):
         R_cl = R_bar
         R_ucl = const['D4'] * R_bar
         R_lcl = const['D3'] * R_bar
-        return {
-            'X': {'CL': X_cl, 'UCL': X_ucl, 'LCL': X_lcl},
-            'R': {'CL': R_cl, 'UCL': R_ucl, 'LCL': R_lcl}
-        }
+        return {'X': {'CL': X_cl, 'UCL': X_ucl, 'LCL': X_lcl},
+                'R': {'CL': R_cl, 'UCL': R_ucl, 'LCL': R_lcl}}
     else:  # X-S
-        # 合并标准差 (pooled std)
         ni = subgroup_stats['subgroup_size']
         si = subgroup_stats['subgroup_std']
         pooled_var = ((ni - 1) * si**2).sum() / (ni - 1).sum()
@@ -144,32 +169,22 @@ def control_limits(subgroup_stats, chart_type='X-S'):
         S_cl = S_bar
         S_ucl = const['B4'] * S_bar
         S_lcl = const['B3'] * S_bar
-        return {
-            'X': {'CL': X_cl, 'UCL': X_ucl, 'LCL': X_lcl},
-            'S': {'CL': S_cl, 'UCL': S_ucl, 'LCL': S_lcl}
-        }
+        return {'X': {'CL': X_cl, 'UCL': X_ucl, 'LCL': X_lcl},
+                'S': {'CL': S_cl, 'UCL': S_ucl, 'LCL': S_lcl}}
 
 def detect_violations(df, subgroup_stats, cl_limits, chart_type, rules_enabled):
-    """
-    对每个样本点应用Western Electric规则，添加 'violation' 列。
-    返回带违规标记的DataFrame。
-    """
     merged = df.merge(subgroup_stats[['group','subgroup_mean','subgroup_std','subgroup_size']], on='group', how='left')
     overall_mean = cl_limits['X']['CL']
     UCL = cl_limits['X']['UCL']
     LCL = cl_limits['X']['LCL']
-    one_sigma = (UCL - overall_mean) / 3  # 1σ 宽度
+    one_sigma = (UCL - overall_mean) / 3
 
     merged['violation'] = ''
 
-    # 规则1：超出3σ
     if rules_enabled.get('rule1', True):
-        mask_above = merged['value'] > UCL
-        mask_below = merged['value'] < LCL
-        merged.loc[mask_above, 'violation'] += 'Rule1(UCL);'
-        merged.loc[mask_below, 'violation'] += 'Rule1(LCL);'
+        merged.loc[merged['value'] > UCL, 'violation'] += 'Rule1(UCL);'
+        merged.loc[merged['value'] < LCL, 'violation'] += 'Rule1(LCL);'
 
-    # 规则2：连续9点在中心线同侧
     if rules_enabled.get('rule2', False):
         side = (merged['value'] > overall_mean).astype(int)
         run_id = (side != side.shift()).cumsum()
@@ -177,7 +192,6 @@ def detect_violations(df, subgroup_stats, cl_limits, chart_type, rules_enabled):
         merged.loc[(run_len >= 9) & (side == 1), 'violation'] += 'Rule2(上);'
         merged.loc[(run_len >= 9) & (side == 0), 'violation'] += 'Rule2(下);'
 
-    # 规则3：连续6点递增或递减
     if rules_enabled.get('rule3', False):
         diff = merged['value'].diff()
         inc = diff > 0
@@ -187,85 +201,64 @@ def detect_violations(df, subgroup_stats, cl_limits, chart_type, rules_enabled):
         merged.loc[inc_run >= 5, 'violation'] += 'Rule3(递增);'
         merged.loc[dec_run >= 5, 'violation'] += 'Rule3(递减);'
 
-    # 规则4：连续14点上下交替
     if rules_enabled.get('rule4', False):
-        s = np.sign(merged['value'].diff())
-        s = s.fillna(0)
+        s = np.sign(merged['value'].diff()).fillna(0)
         alt = (s * s.shift(-1) == -1).astype(int)
         alt_run = alt.groupby((alt != alt.shift()).cumsum()).cumcount() + 1
         merged.loc[alt_run >= 13, 'violation'] += 'Rule4;'
 
-    # 规则5：连续3点中有2点落在2σ以外（同侧）
     if rules_enabled.get('rule5', False):
         upper2 = overall_mean + 2 * one_sigma
         lower2 = overall_mean - 2 * one_sigma
         above2 = merged['value'] > upper2
         below2 = merged['value'] < lower2
-        rolling_above = above2.rolling(3, center=False, min_periods=3).sum() >= 2
-        rolling_below = below2.rolling(3, center=False, min_periods=3).sum() >= 2
-        merged.loc[rolling_above, 'violation'] += 'Rule5(上);'
-        merged.loc[rolling_below, 'violation'] += 'Rule5(下);'
+        merged.loc[above2.rolling(3, min_periods=3).sum() >= 2, 'violation'] += 'Rule5(上);'
+        merged.loc[below2.rolling(3, min_periods=3).sum() >= 2, 'violation'] += 'Rule5(下);'
 
-    # 规则6：连续5点中有4点落在1σ以外（同侧）
     if rules_enabled.get('rule6', False):
         upper1 = overall_mean + one_sigma
         lower1 = overall_mean - one_sigma
         above1 = merged['value'] > upper1
         below1 = merged['value'] < lower1
-        roll_above1 = above1.rolling(5, min_periods=5).sum() >= 4
-        roll_below1 = below1.rolling(5, min_periods=5).sum() >= 4
-        merged.loc[roll_above1, 'violation'] += 'Rule6(上);'
-        merged.loc[roll_below1, 'violation'] += 'Rule6(下);'
+        merged.loc[above1.rolling(5, min_periods=5).sum() >= 4, 'violation'] += 'Rule6(上);'
+        merged.loc[below1.rolling(5, min_periods=5).sum() >= 4, 'violation'] += 'Rule6(下);'
 
-    # 规则7：连续15点在1σ以内（任一侧）
     if rules_enabled.get('rule7', False):
-        within_1sigma = (merged['value'] >= overall_mean - one_sigma) & (merged['value'] <= overall_mean + one_sigma)
-        merged.loc[within_1sigma.rolling(15, min_periods=15).sum() == 15, 'violation'] += 'Rule7;'
+        within = (merged['value'] >= overall_mean - one_sigma) & (merged['value'] <= overall_mean + one_sigma)
+        merged.loc[within.rolling(15, min_periods=15).sum() == 15, 'violation'] += 'Rule7;'
 
-    # 规则8：连续8点在1σ以外（两侧）
     if rules_enabled.get('rule8', False):
-        outside_1sigma = (merged['value'] < overall_mean - one_sigma) | (merged['value'] > overall_mean + one_sigma)
-        merged.loc[outside_1sigma.rolling(8, min_periods=8).sum() == 8, 'violation'] += 'Rule8;'
+        outside = (merged['value'] < overall_mean - one_sigma) | (merged['value'] > overall_mean + one_sigma)
+        merged.loc[outside.rolling(8, min_periods=8).sum() == 8, 'violation'] += 'Rule8;'
 
     merged['violation'] = merged['violation'].str.rstrip(';')
     return merged
 
 def process_capability(df, specs, subgroup_stats, chart_type):
-    """
-    计算Cpk, Ppk, 不良率等。
-    返回字典包含所有指标。
-    """
     usl = specs.get('usl')
     lsl = specs.get('lsl')
     overall_mean = df['value'].mean()
     overall_std = df['value'].std(ddof=1)
 
-    # 组内标准差估计
+    # 组内标准差
     if chart_type == 'X-R':
         R_bar = (subgroup_stats['subgroup_range'] * subgroup_stats['subgroup_size']).sum() / subgroup_stats['subgroup_size'].sum()
         n_avg = int(round(subgroup_stats['subgroup_size'].mean()))
         const = get_constants(n_avg)
         sigma_within = R_bar / const['d2']
-    else:  # X-S
-        # 合并标准差 (pooled std)
+    else:
         ni = subgroup_stats['subgroup_size']
         si = subgroup_stats['subgroup_std']
         pooled_var = ((ni - 1) * si**2).sum() / (ni - 1).sum()
         S_bar = np.sqrt(pooled_var)
-        # 使用平均子组大小对应的 c4 系数（而不是自由度）
         n_avg = int(round(subgroup_stats['subgroup_size'].mean()))
         if n_avg < 2:
-            n_avg = 2  # 最小为 2，防止 get_constants 报错
+            n_avg = 2
         const = get_constants(n_avg)
         sigma_within = S_bar / const['c4']
 
-    res = {
-        'overall_mean': overall_mean,
-        'overall_std': overall_std,
-        'sigma_within': sigma_within
-    }
+    res = {'overall_mean': overall_mean, 'overall_std': overall_std, 'sigma_within': sigma_within}
 
-    # 计算 CPU, CPL, PPU, PPL, Cpk, Ppk, 不良率
     if usl is not None and lsl is not None:
         CPU = (usl - overall_mean) / (3 * sigma_within) if sigma_within > 0 else np.inf
         CPL = (overall_mean - lsl) / (3 * sigma_within) if sigma_within > 0 else np.inf
