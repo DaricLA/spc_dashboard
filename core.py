@@ -246,21 +246,18 @@ def process_capability(df, specs, subgroup_stats, chart_type):
         n_avg = int(round(subgroup_stats['subgroup_size'].mean()))
         const = get_constants(n_avg)
         sigma_within = R_bar / const['d2']
-    else:
+    else:  # X-S
+        # 合并标准差 (pooled std)
         ni = subgroup_stats['subgroup_size']
         si = subgroup_stats['subgroup_std']
         pooled_var = ((ni - 1) * si**2).sum() / (ni - 1).sum()
         S_bar = np.sqrt(pooled_var)
-        # 计算合并的自由度
-        dof = (ni - 1).sum()
-        # 查找 c4 系数，若 dof > 25 使用近似值
-        if dof in get_constants(0):  # 这里只是触发一下异常，实际用下面的逻辑
-            pass
-        if dof <= 25:
-            c4_val = get_constants(dof)['c4']
-        else:
-            c4_val = 1 - 1 / (4 * dof)  # 近似公式
-        sigma_within = S_bar / c4_val
+        # 使用平均子组大小对应的 c4 系数（而不是自由度）
+        n_avg = int(round(subgroup_stats['subgroup_size'].mean()))
+        if n_avg < 2:
+            n_avg = 2  # 最小为 2，防止 get_constants 报错
+        const = get_constants(n_avg)
+        sigma_within = S_bar / const['c4']
 
     res = {
         'overall_mean': overall_mean,
@@ -268,7 +265,7 @@ def process_capability(df, specs, subgroup_stats, chart_type):
         'sigma_within': sigma_within
     }
 
-    # 根据规格限计算能力指数
+    # 计算 CPU, CPL, PPU, PPL, Cpk, Ppk, 不良率
     if usl is not None and lsl is not None:
         CPU = (usl - overall_mean) / (3 * sigma_within) if sigma_within > 0 else np.inf
         CPL = (overall_mean - lsl) / (3 * sigma_within) if sigma_within > 0 else np.inf
