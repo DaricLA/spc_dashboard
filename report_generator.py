@@ -1,5 +1,6 @@
 """
 生成包含统计图表的完整 HTML 报告
+修复：确保 Plotly.js 只加载一次，图表正确渲染
 """
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -9,9 +10,6 @@ import numpy as np
 from datetime import datetime
 
 def generate_html_report(output_path, df, subgroup_stats, cl, marked, cap, specs, chart_type):
-    """
-    生成完整 HTML 报告，保存到 output_path
-    """
     # 分布图
     fig_dist = go.Figure()
     groups = sorted(df['group'].unique())
@@ -21,20 +19,24 @@ def generate_html_report(output_path, df, subgroup_stats, cl, marked, cap, specs
                                      name=str(grp), box_visible=True, meanline_visible=True,
                                      points='all', spanmode='hard'))
     if specs.get('usl'):
-        fig_dist.add_hline(y=specs['usl'], line_dash="dash", line_color="red", annotation_text="USL")
+        fig_dist.add_hline(y=specs['usl'], line_dash="dash", line_color="red",
+                           annotation_text="USL", annotation_position="right")
     if specs.get('lsl'):
-        fig_dist.add_hline(y=specs['lsl'], line_dash="dash", line_color="red", annotation_text="LSL")
+        fig_dist.add_hline(y=specs['lsl'], line_dash="dash", line_color="red",
+                           annotation_text="LSL", annotation_position="right")
     if specs.get('ref_upper'):
-        fig_dist.add_hline(y=specs['ref_upper'], line_dash="dot", line_color="orange", annotation_text="参考上限")
+        fig_dist.add_hline(y=specs['ref_upper'], line_dash="dot", line_color="orange",
+                           annotation_text="参考上限", annotation_position="right")
     if specs.get('ref_lower'):
-        fig_dist.add_hline(y=specs['ref_lower'], line_dash="dot", line_color="orange", annotation_text="参考下限")
+        fig_dist.add_hline(y=specs['ref_lower'], line_dash="dot", line_color="orange",
+                           annotation_text="参考下限", annotation_position="right")
     fig_dist.update_layout(title="分布概览（按分组）", height=400)
 
     # 控制图
     fig_ctl = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05,
-                             row_heights=[0.65, 0.35],
-                             subplot_titles=(f"X̄ 控制图 ({chart_type})",
-                                             "R 图" if chart_type == 'X-R' else "S 图"))
+                            row_heights=[0.65, 0.35],
+                            subplot_titles=(f"X̄ 控制图 ({chart_type})",
+                                            "R 图" if chart_type == 'X-R' else "S 图"))
     # X̄
     fig_ctl.add_trace(go.Scatter(x=subgroup_stats['group'], y=subgroup_stats['subgroup_mean'],
                                  mode='markers+lines', name='子组均值', marker_color='blue'), row=1, col=1)
@@ -61,25 +63,40 @@ def generate_html_report(output_path, df, subgroup_stats, cl, marked, cap, specs
     fig_ctl.add_hline(y=cl[cl_key]['LCL'], line_color="red", line_dash="dash", row=2, col=1)
     fig_ctl.update_layout(height=600, showlegend=False)
 
-    # 指标卡数据
+    # 指标卡：Cpk, Ppk 可能为 None 时显示 N/A
+    cpk_str = f"{cap['Cpk']:.3f}" if cap.get('Cpk') is not None else "N/A"
+    ppk_str = f"{cap['Ppk']:.3f}" if cap.get('Ppk') is not None else "N/A"
+    defect_str = f"{cap['defect_rate']:.2f}%" if cap.get('defect_rate') is not None else "N/A"
+    detail_parts = []
+    if 'CPU' in cap and cap['CPU'] is not None:
+        detail_parts.append(f"CPU={cap['CPU']:.3f}")
+    if 'CPL' in cap and cap['CPL'] is not None:
+        detail_parts.append(f"CPL={cap['CPL']:.3f}")
+    if 'PPU' in cap and cap['PPU'] is not None:
+        detail_parts.append(f"PPU={cap['PPU']:.3f}")
+    if 'PPL' in cap and cap['PPL'] is not None:
+        detail_parts.append(f"PPL={cap['PPL']:.3f}")
+    detail_str = " | ".join(detail_parts)
+
     metrics_html = f"""
     <div class="metrics">
         <div class="metric"><span>总样本数</span><strong>{len(df)}</strong></div>
         <div class="metric"><span>均值</span><strong>{cap['overall_mean']:.4f}</strong></div>
         <div class="metric"><span>整体标准差</span><strong>{cap['overall_std']:.4f}</strong></div>
-        <div class="metric"><span>Cpk</span><strong>{cap.get('Cpk', 'N/A') if cap.get('Cpk') is not None else 'N/A'}</strong></div>
-        <div class="metric"><span>Ppk</span><strong>{cap.get('Ppk', 'N/A') if cap.get('Ppk') is not None else 'N/A'}</strong></div>
-        <div class="metric"><span>不良率 %</span><strong>{cap.get('defect_rate', 'N/A') if cap.get('defect_rate') is not None else 'N/A'}</strong></div>
+        <div class="metric"><span>Cpk</span><strong>{cpk_str}</strong></div>
+        <div class="metric"><span>Ppk</span><strong>{ppk_str}</strong></div>
+        <div class="metric"><span>不良率</span><strong>{defect_str}</strong></div>
     </div>
+    <p style="color:#555; margin:5px 0;">{detail_str}</p>
     """
-    # 违规明细表
+
     viol_table = ""
     if not viol.empty:
         viol_table = viol[['sample_id', 'group', 'value', 'violation']].to_html(classes='violation-table', index=False)
     else:
         viol_table = "<p>未检测到违规或超规格点。</p>"
 
-    # 完整 HTML
+    # 注意：使用 include_plotlyjs='cdn' 仅在第一个图表中包含，避免重复加载
     html = f"""
     <!DOCTYPE html>
     <html>
@@ -88,7 +105,7 @@ def generate_html_report(output_path, df, subgroup_stats, cl, marked, cap, specs
         <title>SPC 分析报告 - {datetime.now().strftime('%Y-%m-%d %H:%M')}</title>
         <style>
             body {{ font-family: Arial, sans-serif; margin: 20px; }}
-            h1 {{ color: #2c3e50; }}
+            h1, h2 {{ color: #2c3e50; }}
             .metrics {{ display: flex; flex-wrap: wrap; gap: 15px; margin: 20px 0; }}
             .metric {{ background: #ecf0f1; border-radius: 8px; padding: 15px; min-width: 120px; text-align: center; }}
             .metric span {{ display: block; font-size: 0.9em; color: #7f8c8d; }}
