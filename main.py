@@ -299,40 +299,43 @@ class Application(tk.Tk):
         else:
             self.config_combo.set('')
 
-    def save_config(self):
-        name = simpledialog.askstring("保存配置", "输入配置名称:")
-        if not name:
+def save_config(self):
+    name = simpledialog.askstring("保存配置", "输入配置名称:")
+    if not name:
+        return
+    if name in self.all_configs:
+        if not messagebox.askyesno("确认覆盖", f"配置 '{name}' 已存在，是否覆盖？"):
             return
-        config = {
-            'output_dir': self.output_dir.get(),
-            'sample_id': self.combo_sid.get(),
-            'group': self.combo_grp.get(),
-            'preprocess': {
-                'del_empty': self.var_del_empty.get(),
-                'del_dup': self.var_del_dup.get(),
-                'fill_na': self.var_fillna.get(),
-                'outlier': self.var_outlier.get()
-            },
-            'value_configs': [],
-            'label_rules': self.label_rules
+    config = {
+        'output_dir': self.output_dir.get(),
+        'sample_id': self.combo_sid.get(),
+        'group': self.combo_grp.get(),
+        'preprocess': {
+            'del_empty': self.var_del_empty.get(),
+            'del_dup': self.var_del_dup.get(),
+            'fill_na': self.var_fillna.get(),
+            'outlier': self.var_outlier.get()
+        },
+        'value_configs': [],
+        'label_rules': self.label_rules
+    }
+    for rd in self.value_rows:
+        vc = {
+            'value_col': rd['combo_val'].get(),
+            'usl_choice': rd['usl_choice'].get(),
+            'usl_col': rd['combo_usl'].get(),
+            'usl_val': rd['entry_usl'].get(),
+            'lsl_choice': rd['lsl_choice'].get(),
+            'lsl_col': rd['combo_lsl'].get(),
+            'lsl_val': rd['entry_lsl'].get(),
+            'ref_upper': rd['entry_refu'].get(),
+            'ref_lower': rd['entry_refl'].get()
         }
-        for rd in self.value_rows:
-            vc = {
-                'value_col': rd['combo_val'].get(),
-                'usl_choice': rd['usl_choice'].get(),
-                'usl_col': rd['combo_usl'].get(),
-                'usl_val': rd['entry_usl'].get(),
-                'lsl_choice': rd['lsl_choice'].get(),
-                'lsl_col': rd['combo_lsl'].get(),
-                'lsl_val': rd['entry_lsl'].get(),
-                'ref_upper': rd['entry_refu'].get(),
-                'ref_lower': rd['entry_refl'].get()
-            }
-            config['value_configs'].append(vc)
-        self.all_configs[name] = config
-        self._save_all_configs()
-        self.refresh_config_list()
-        messagebox.showinfo("完成", f"配置已保存为 {name}")
+        config['value_configs'].append(vc)
+    self.all_configs[name] = config
+    self._save_all_configs()
+    self.refresh_config_list()
+    messagebox.showinfo("完成", f"配置已保存为 {name}")
 
     def load_config(self):
         name = self.config_combo.get()
