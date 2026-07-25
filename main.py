@@ -1,5 +1,5 @@
 """
-SPC 报告生成器 - 多数值列支持，配置管理增强
+SPC 报告生成器 - SCT 分析，界面美化
 """
 import tkinter as tk
 from tkinter import filedialog, ttk, messagebox, simpledialog, colorchooser
@@ -16,7 +16,7 @@ from report_generator import generate_html_report
 class Application(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("SPC 分析报告生成器")
+        self.title("SCT 分析报告生成器")
         self.geometry("1100x850")
         self.minsize(900, 700)
         self.resizable(True, True)
@@ -25,14 +25,12 @@ class Application(tk.Tk):
         self.header_rows = []
         self.output_dir = tk.StringVar()
 
-        # 数值列配置列表，每项为一个 dict，包含映射及规格设置
-        self.value_configs = []  # [{value_col, usl_choice, usl_val, usl_col, lsl_choice, lsl_val, lsl_col, ref_upper, ref_lower}]
-        self.label_rules = []  # 全局标签规则
+        self.value_configs = []
+        self.label_rules = []
 
         self.create_widgets()
         self.create_config_management()
 
-    # ---------- UI 构建 ----------
     def create_widgets(self):
         # 顶部文件选择
         top = tk.Frame(self)
@@ -41,7 +39,7 @@ class Application(tk.Tk):
         self.lbl_count = tk.Label(top, text="未选择文件")
         self.lbl_count.pack(side=tk.LEFT, padx=10)
         self.btn_merge = tk.Button(top, text="仅合并文件", command=self.merge_only, state="disabled",
-                                   bg="#3498db", fg="white")
+                                   bg="#3498db", fg="white", font=('Arial', 9, 'bold'))
         self.btn_merge.pack(side=tk.RIGHT, padx=5)
 
         # 输出目录
@@ -83,8 +81,9 @@ class Application(tk.Tk):
         self.create_label_section(page3)
 
         # 生成按钮
-        self.btn_gen = tk.Button(self, text="生成 HTML 报告", command=self.start_analysis,
-                                 bg="#2ecc71", fg="white", height=2, state="disabled")
+        self.btn_gen = tk.Button(self, text="生成 SCT 分析报告", command=self.start_analysis,
+                                 bg="#2ecc71", fg="white", height=2, state="disabled",
+                                 font=('Arial', 11, 'bold'))
         self.btn_gen.pack(pady=10)
         self.status = tk.Label(self, text="", fg="blue")
         self.status.pack()
@@ -93,10 +92,10 @@ class Application(tk.Tk):
         f = tk.LabelFrame(parent, text="字段映射（必填）")
         f.pack(fill=tk.X, padx=5, pady=5)
         tk.Label(f, text="样本ID列:").grid(row=0, column=0, sticky="e")
-        self.combo_sid = ttk.Combobox(f, state="readonly", width=15)
+        self.combo_sid = ttk.Combobox(f, state="readonly", width=30)  # 宽度加倍
         self.combo_sid.grid(row=0, column=1, sticky="w")
         tk.Label(f, text="分组列:").grid(row=0, column=2, sticky="e")
-        self.combo_grp = ttk.Combobox(f, state="readonly", width=15)
+        self.combo_grp = ttk.Combobox(f, state="readonly", width=30)
         self.combo_grp.grid(row=0, column=3, sticky="w")
 
         # 预处理选项
@@ -114,7 +113,6 @@ class Application(tk.Tk):
         tk.Entry(pf, textvariable=self.var_outlier, width=5).grid(row=0, column=5, sticky="w")
 
     def create_value_col_section(self, parent):
-        """动态增删数值列设置"""
         f = tk.LabelFrame(parent, text="数值列管理（可添加多个）")
         f.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
@@ -123,12 +121,9 @@ class Application(tk.Tk):
         tk.Button(btn_frame, text="添加数值列", command=self.add_value_row).pack(side=tk.LEFT)
         tk.Button(btn_frame, text="删除选中列", command=self.delete_value_row).pack(side=tk.LEFT, padx=5)
 
-        # 使用 Frame 容器
         self.value_frame = tk.Frame(f)
         self.value_frame.pack(fill=tk.BOTH, expand=True)
-        self.value_rows = []  # 存储每个数值列对应的 Frame 和变量
-
-        # 默认添加一行
+        self.value_rows = []
         self.add_value_row()
 
     def add_value_row(self):
@@ -137,7 +132,7 @@ class Application(tk.Tk):
 
         # 数值列选择
         tk.Label(row_frame, text="数值列:").grid(row=0, column=0, sticky="e")
-        combo_val = ttk.Combobox(row_frame, state="readonly", width=12)
+        combo_val = ttk.Combobox(row_frame, state="readonly", width=20)  # 宽度加大
         combo_val.grid(row=0, column=1, sticky="w")
         if hasattr(self, 'all_columns'):
             combo_val['values'] = self.all_columns
@@ -149,9 +144,9 @@ class Application(tk.Tk):
         usl_choice = tk.StringVar(value="手动")
         tk.Radiobutton(row_frame, text="列", variable=usl_choice, value="列").grid(row=0, column=3)
         tk.Radiobutton(row_frame, text="手动", variable=usl_choice, value="手动").grid(row=0, column=4)
-        combo_usl = ttk.Combobox(row_frame, state="readonly", width=8)
+        combo_usl = ttk.Combobox(row_frame, state="readonly", width=12)
         combo_usl.grid(row=0, column=5)
-        entry_usl = tk.Entry(row_frame, width=6)
+        entry_usl = tk.Entry(row_frame, width=8)
         entry_usl.grid(row=0, column=6)
         usl_choice.trace_add('write', lambda *a, r=row_frame: self.toggle_spec_row(r))
 
@@ -160,21 +155,20 @@ class Application(tk.Tk):
         lsl_choice = tk.StringVar(value="手动")
         tk.Radiobutton(row_frame, text="列", variable=lsl_choice, value="列").grid(row=1, column=3)
         tk.Radiobutton(row_frame, text="手动", variable=lsl_choice, value="手动").grid(row=1, column=4)
-        combo_lsl = ttk.Combobox(row_frame, state="readonly", width=8)
+        combo_lsl = ttk.Combobox(row_frame, state="readonly", width=12)
         combo_lsl.grid(row=1, column=5)
-        entry_lsl = tk.Entry(row_frame, width=6)
+        entry_lsl = tk.Entry(row_frame, width=8)
         entry_lsl.grid(row=1, column=6)
         lsl_choice.trace_add('write', lambda *a, r=row_frame: self.toggle_spec_row(r))
 
         # 参考
         tk.Label(row_frame, text="参考上限:").grid(row=2, column=0, sticky="e")
-        entry_refu = tk.Entry(row_frame, width=6)
+        entry_refu = tk.Entry(row_frame, width=8)
         entry_refu.grid(row=2, column=1)
         tk.Label(row_frame, text="参考下限:").grid(row=2, column=2, sticky="e")
-        entry_refl = tk.Entry(row_frame, width=6)
+        entry_refl = tk.Entry(row_frame, width=8)
         entry_refl.grid(row=2, column=3)
 
-        # 保存到列表
         row_data = {
             'frame': row_frame,
             'combo_val': combo_val,
@@ -194,12 +188,10 @@ class Application(tk.Tk):
         if len(self.value_rows) <= 1:
             messagebox.showwarning("警告", "至少保留一个数值列")
             return
-        # 删除最后一个（可改进为选择删除）
         last = self.value_rows.pop()
         last['frame'].destroy()
 
     def toggle_spec_row(self, row_frame):
-        """根据选择禁用/启用输入框"""
         for rd in self.value_rows:
             if rd['frame'] == row_frame:
                 if rd['usl_choice'].get() == "列":
@@ -252,7 +244,7 @@ class Application(tk.Tk):
         frm = tk.Frame(self)
         frm.pack(fill=tk.X, padx=10, pady=5, before=self.notebook)
         tk.Label(frm, text="制程站位:").pack(side=tk.LEFT)
-        self.config_combo = ttk.Combobox(frm, state="readonly", width=25)
+        self.config_combo = ttk.Combobox(frm, state="readonly", width=30)  # 宽度加大
         self.config_combo.pack(side=tk.LEFT, padx=5)
         self.refresh_config_list()
         tk.Button(frm, text="加载", command=self.load_config).pack(side=tk.LEFT, padx=5)
@@ -318,7 +310,6 @@ class Application(tk.Tk):
             return
         with open(path, 'r', encoding='utf-8') as f:
             data = json.load(f)
-        # 应用基本设置
         self.output_dir.set(data.get('output_dir', ''))
         self.combo_sid.set(data.get('sample_id', ''))
         self.combo_grp.set(data.get('group', ''))
@@ -330,7 +321,6 @@ class Application(tk.Tk):
         self.label_rules = data.get('label_rules', [])
         self.refresh_label_listbox()
 
-        # 重建数值列行
         for row in self.value_rows:
             row['frame'].destroy()
         self.value_rows.clear()
@@ -355,13 +345,11 @@ class Application(tk.Tk):
                 rd['entry_refl'].delete(0, tk.END)
                 rd['entry_refl'].insert(0, vc.get('ref_lower', ''))
                 self.toggle_spec_row(rd['frame'])
-        # 更新下拉框（需要文件已选）
         if hasattr(self, 'all_columns'):
             for rd in self.value_rows:
                 rd['combo_val']['values'] = self.all_columns
                 rd['combo_usl']['values'] = self.all_columns
                 rd['combo_lsl']['values'] = self.all_columns
-
         messagebox.showinfo("完成", f"配置 {name} 已加载")
 
     def delete_config(self):
@@ -388,7 +376,6 @@ class Application(tk.Tk):
         self.refresh_file_list()
         if not self.output_dir.get():
             self.output_dir.set(os.path.dirname(self.file_paths[0]))
-        # 获取第一个文件的列名
         try:
             first = self.file_paths[0]
             ext = os.path.splitext(first)[1].lower()
@@ -397,7 +384,6 @@ class Application(tk.Tk):
             else:
                 df = pd.read_excel(first, header=self.header_rows[0])
             self.all_columns = list(df.columns)
-            # 更新所有下拉框
             for combo in [self.combo_sid, self.combo_grp]:
                 combo['values'] = self.all_columns
                 if self.all_columns:
@@ -443,16 +429,13 @@ class Application(tk.Tk):
 
     def run_analysis(self, out_dir):
         try:
-            # 构建基本映射（分组列必填）
             mapping = {
                 'sample_id': self.combo_sid.get(),
                 'group': self.combo_grp.get()
             }
             if not mapping['group']:
                 raise ValueError("请选择分组列")
-            # 读取并合并原始数据
             df = core.process_data(self.file_paths, self.header_rows, mapping)
-            # 预处理
             df = core.preprocess_data(df,
                                       delete_empty=self.var_del_empty.get(),
                                       delete_duplicates=self.var_del_dup.get(),
@@ -460,11 +443,9 @@ class Application(tk.Tk):
                                       fill_na=self.var_fillna.get())
             if df.empty:
                 raise ValueError("预处理后无数据")
-            # 确认 group 列存在
             if 'group' not in df.columns:
                 raise ValueError("数据中无分组列，请检查字段映射")
 
-            # 收集数值列配置
             value_configs = []
             for rd in self.value_rows:
                 val_col = rd['combo_val'].get()
@@ -476,11 +457,9 @@ class Application(tk.Tk):
             if not value_configs:
                 raise ValueError("至少需要一个有效的数值列")
 
-            # 获取标签规则
             label_rules = self.label_rules
 
-            # 生成报告（固定使用 'group' 列）
-            out_path = os.path.join(out_dir, f"SPC_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html")
+            out_path = os.path.join(out_dir, f"SCT_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html")
             generate_html_report(out_path, df, value_configs, label_rules, group_col='group')
             import webbrowser
             webbrowser.open(f"file:///{out_path}")
@@ -489,7 +468,6 @@ class Application(tk.Tk):
             self.after(0, lambda: self.analysis_error(str(e)))
 
     def _extract_specs(self, rd, df):
-        """从界面行提取规格字典"""
         def get_val(choice, combo, entry):
             if choice == "列":
                 col = combo.get()
@@ -504,7 +482,6 @@ class Application(tk.Tk):
                     except:
                         return None
                 return None
-
         usl = get_val(rd['usl_choice'].get(), rd['combo_usl'], rd['entry_usl'])
         lsl = get_val(rd['lsl_choice'].get(), rd['combo_lsl'], rd['entry_lsl'])
         ref_upper = None
