@@ -1,5 +1,5 @@
 """
-生成 SCT 离线 HTML 报告：模块化布局，色块标签贴近x轴，超规数值高亮
+生成 SCT 离线 HTML 报告：模块化布局，规格线标注外置，标签修复，卡片高亮
 """
 import plotly.graph_objects as go
 import plotly.io as pio
@@ -65,7 +65,6 @@ def _detect_spec_violations(df, value_col, specs):
     if specs.get('lsl'):
         viol.loc[series < specs['lsl'], '超规描述'] += '超LSL;'
     viol['超规描述'] = viol['超规描述'].str.rstrip(';')
-    # 保留必要列并统一数值列为 'value'
     result = viol[['sample_id', 'group', value_col, '超规描述']].copy()
     result.rename(columns={value_col: 'value'}, inplace=True)
     result['数值列'] = value_col
@@ -82,9 +81,34 @@ def generate_html_report(output_path, df, value_configs, label_rules, group_col=
         viol_df = _detect_spec_violations(df, col, specs)
         all_violations.append(viol_df)
 
-        cpk_val = f"{cap['Cpk']:.3f}" if cap['Cpk'] is not None else "N/A"
-        ppk_val = f"{cap['Ppk']:.3f}" if cap['Ppk'] is not None else "N/A"
-        defect_val = f"{cap['defect_rate']:.4f}% ({cap['dppm']:.0f} DPPM)" if cap['defect_rate'] is not None else "N/A"
+        cpk_val = cap['Cpk']
+        ppk_val = cap['Ppk']
+        defect_rate = cap['defect_rate']
+
+        # 根据阈值确定背景颜色
+        def get_highlight_style(value, threshold=1.33, is_defect=False):
+            if value is None:
+                return ''
+            if is_defect:
+                # 不良率 > 0 高亮为红色
+                if value > 0:
+                    return 'background-color: #ffcccc;'
+                else:
+                    return 'background-color: #ccffcc;'
+            else:
+                # Cpk/Ppk ≤ threshold 红色，否则绿色
+                if value <= threshold:
+                    return 'background-color: #ffcccc;'
+                else:
+                    return 'background-color: #ccffcc;'
+
+        cpk_style = get_highlight_style(cpk_val)
+        ppk_style = get_highlight_style(ppk_val)
+        defect_style = get_highlight_style(defect_rate, is_defect=True)
+
+        cpk_display = f"{cpk_val:.3f}" if cpk_val is not None else "N/A"
+        ppk_display = f"{ppk_val:.3f}" if ppk_val is not None else "N/A"
+        defect_display = f"{defect_rate:.4f}% ({cap['dppm']:.0f} DPPM)" if defect_rate is not None else "N/A"
 
         stats_html = f"""
         <div class="stats-row">
@@ -93,9 +117,9 @@ def generate_html_report(output_path, df, value_configs, label_rules, group_col=
             <span class="stat">最小值: {cap['min']:.4f}</span>
             <span class="stat">最大值: {cap['max']:.4f}</span>
             <span class="stat">标准差: {cap['std']:.4f}</span>
-            <span class="stat">Cpk: {cpk_val}</span>
-            <span class="stat">Ppk: {ppk_val}</span>
-            <span class="stat">不良率: {defect_val}</span>
+            <span class="stat" style="{cpk_style}">Cpk: {cpk_display}</span>
+            <span class="stat" style="{ppk_style}">Ppk: {ppk_display}</span>
+            <span class="stat" style="{defect_style}">不良率: {defect_display}</span>
         </div>"""
 
         legend_html = ""
@@ -119,7 +143,6 @@ def generate_html_report(output_path, df, value_configs, label_rules, group_col=
         </section>"""
         sections.append(section)
 
-    # 合并超规数据，生成表格 HTML（直接在此处生成，避免列名错误）
     if all_violations:
         all_viol = pd.concat(all_violations, ignore_index=True)
     else:
@@ -194,21 +217,34 @@ def _create_single_chart(df, value_col, specs, label_rules, group_col, viol_df):
                                  marker=dict(symbol='x', color='red', size=10, line=dict(width=2)),
                                  text=viol_df['超规描述'], showlegend=False))
 
-    # 规格线
-    if specs.get('usl') is not None:
-        fig.add_hline(y=specs['usl'], line_dash="dash", line_color="red",
-                      annotation_text=f"USL:{specs['usl']}", annotation_position="right")
-    if specs.get('lsl') is not None:
-        fig.add_hline(y=specs['lsl'], line_dash="dash", line_color="red",
-                      annotation_text=f"LSL:{specs['lsl']}", annotation_position="right")
-    if specs.get('ref_upper') is not None:
-        fig.add_hline(y=specs['ref_upper'], line_dash="dot", line_color="orange",
-                      annotation_text=f"UCL:{specs['ref_upper']}", annotation_position="right")
-    if specs.get('ref_lower') is not None:
-        fig.add_hline(y=specs['ref_lower'], line_dash="dot", line_color="orange",
-                      annotation_text=f"LCL:{specs['ref_lower']}", annotation_position="right")
+    # 绘制规格线和参考线，但不使用 add_hline 的 annotation，改用独立标注
+    y_max = df[value_col].max()
+    y_min = df[value_col].min()
+    x_range = df[group_col].nunique()
+    # 右边距数值
+    right_x = groups[-1] if len(groups) > 0 else 0
 
-    # 自定义标签：贴近 x 轴的小方块（正方形）
+    def add_spec_annotation(y_val, text, color):
+        if y_val is not None:
+            fig.add_hline(y=y_val, line_dash="dash", line_color=color)
+            fig.add_annotation(
+                x=right_x, y=y_val,
+                xref='x', yref='y',
+                text=text,
+                showarrow=False,
+                xanchor='left',
+                yanchor='middle',
+                font=dict(color=color, size=10),
+                ax=40,  # 向右偏移像素，使其位于绘图区外
+                ay=0
+            )
+
+    add_spec_annotation(specs.get('usl'), f"USL:{specs['usl']}" if specs.get('usl') is not None else None, "red")
+    add_spec_annotation(specs.get('lsl'), f"LSL:{specs['lsl']}" if specs.get('lsl') is not None else None, "red")
+    add_spec_annotation(specs.get('ref_upper'), f"UCL:{specs['ref_upper']}" if specs.get('ref_upper') is not None else None, "orange")
+    add_spec_annotation(specs.get('ref_lower'), f"LCL:{specs['ref_lower']}" if specs.get('ref_lower') is not None else None, "orange")
+
+    # 自定义标签：修复“包含”逻辑，所有匹配分组都添加色块
     if label_rules:
         for rule in label_rules:
             op = rule['operator']
@@ -232,9 +268,10 @@ def _create_single_chart(df, value_col, specs, label_rules, group_col, viol_df):
                         yanchor='bottom',
                         yshift=15
                     )
-                    break
 
     fig.update_xaxes(tickangle=45)
-    fig.update_layout(height=400, margin=dict(l=40, r=40, t=40, b=80),
-                      plot_bgcolor='white', showlegend=False)
+    fig.update_layout(height=400,
+                      margin=dict(l=40, r=120, t=40, b=80),  # 增大右边距
+                      plot_bgcolor='white',
+                      showlegend=False)
     return fig
