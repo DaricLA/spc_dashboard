@@ -1,5 +1,5 @@
 """
-生成 SCT 离线 HTML 报告：合并分布图（小提琴背景+散点），统计卡片，标签在底部
+生成 SCT 离线 HTML 报告：合并分布图（小提琴背景+散点），统计卡片在外，标签在底部
 """
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -72,9 +72,10 @@ def generate_html_report(output_path, df, value_configs, label_rules, group_col=
     n_cols = len(value_configs)
     fig = make_subplots(rows=n_cols, cols=1,
                         subplot_titles=[f"<b>{vc['value_col']}</b>" for vc in value_configs],
-                        vertical_spacing=0.15)  # 增加间距给统计卡片和标签
+                        vertical_spacing=0.12)
 
     all_violations = []
+    stats_blocks = []   # 收集每个数值列的统计卡片 HTML
 
     for i, vc in enumerate(value_configs):
         col = vc['value_col']
@@ -84,42 +85,22 @@ def generate_html_report(output_path, df, value_configs, label_rules, group_col=
         viol_df['数值列'] = col
         all_violations.append(viol_df)
 
-        # 构建统计卡片（一行多个小框）
-        xref = 'x' if i == 0 else f'x{i+1}'
-        yref = 'paper'  # 使用 paper 坐标方便定位在子图上方
-        # 统计项：均值, 最小值, 最大值, 标准差, Cpk, Ppk, 不良率(含DPPM)
+        # 构建统计卡片 HTML
         cpk_val = f"{cap['Cpk']:.3f}" if cap['Cpk'] is not None else "N/A"
         ppk_val = f"{cap['Ppk']:.3f}" if cap['Ppk'] is not None else "N/A"
         defect_val = f"{cap['defect_rate']:.4f}%({cap['dppm']:.0f} DPPM)" if cap['defect_rate'] is not None else "N/A"
-        stats = [
-            f"均值: {cap['mean']:.4f}",
-            f"最小值: {cap['min']:.4f}",
-            f"最大值: {cap['max']:.4f}",
-            f"标准差: {cap['std']:.4f}",
-            f"Cpk: {cpk_val}",
-            f"Ppk: {ppk_val}",
-            f"不良率: {defect_val}"
-        ]
-        # 7 个卡片均匀分布在 x domain [0.02, 0.98]
-        positions = np.linspace(0.02, 0.98, len(stats))
-        # 计算子图顶部在 paper 坐标中的位置（大致估计：每个子图高度为 1/n_cols，顶部 y 递减）
-        # 这里简化：使用 yref='paper'，y 坐标从顶部开始，每下降一个子图偏移
-        top_y = 0.95 - i * (0.95 - 0.05) / n_cols  # 大致定位到对应子图的上方
-        # 添加一行统计卡片
-        for pos, stat_text in zip(positions, stats):
-            fig.add_annotation(
-                xref='paper', yref='paper',
-                x=pos, y=top_y,
-                text=stat_text,
-                showarrow=False,
-                font=dict(size=10, color='#2c3e50'),
-                bgcolor='#ecf0f1',
-                bordercolor='#bdc3c7',
-                borderwidth=1,
-                borderpad=3,
-                xanchor='center',
-                yanchor='bottom'
-            )
+        stats_html = f"""
+        <div class="stats-row">
+            <span class="stat"><b>{col}</b></span>
+            <span class="stat">均值: {cap['mean']:.4f}</span>
+            <span class="stat">最小值: {cap['min']:.4f}</span>
+            <span class="stat">最大值: {cap['max']:.4f}</span>
+            <span class="stat">标准差: {cap['std']:.4f}</span>
+            <span class="stat">Cpk: {cpk_val}</span>
+            <span class="stat">Ppk: {ppk_val}</span>
+            <span class="stat">不良率: {defect_val}</span>
+        </div>"""
+        stats_blocks.append(stats_html)
 
         groups = sorted(df[group_col].unique())
         # 小提琴背景
@@ -139,7 +120,7 @@ def generate_html_report(output_path, df, value_configs, label_rules, group_col=
                                      text=viol_df['超规描述'], showlegend=False),
                           row=i+1, col=1)
 
-        # 规格线和参考线（带值）
+        # 规格线和参考线
         if specs.get('usl') is not None:
             fig.add_hline(y=specs['usl'], line_dash="dash", line_color="red", row=i+1, col=1,
                           annotation_text=f"USL:{specs['usl']}", annotation_position="right")
@@ -153,8 +134,12 @@ def generate_html_report(output_path, df, value_configs, label_rules, group_col=
             fig.add_hline(y=specs['ref_lower'], line_dash="dot", line_color="orange", row=i+1, col=1,
                           annotation_text=f"LCL:{specs['ref_lower']}", annotation_position="right")
 
-        # 自定义标签：放置在每个 x 轴标签下方（二级轴）
+        # 自定义标签：放置在子图底部，贴近 x 轴
         if label_rules:
+            # 使用子图的实际 x 轴引用（对于第一个子图为 'x'，其余为 'x2','x3'...）
+            xref = 'x' if i == 0 else f'x{i+1}'
+            # 计算数据最小值，标签放在最小值下方一点
+            y_min = df[col].min() - 0.02 * (df[col].max() - df[col].min())
             for rule in label_rules:
                 op = rule['operator']
                 val = rule['value']
@@ -164,29 +149,31 @@ def generate_html_report(output_path, df, value_configs, label_rules, group_col=
                     grp_str = str(grp)
                     if (op == 'equals' and grp_str == val) or (op == 'contains' and val in grp_str):
                         fig.add_annotation(
-                            xref=xref,  # 使用子图 x 轴引用
-                            yref='paper',
-                            x=grp, y=0,  # 底部
+                            xref=xref, yref='y',
+                            x=grp, y=y_min,
                             text=f"<b>{label}</b>",
                             showarrow=False,
                             font=dict(color='black', size=10, family='Microsoft YaHei'),
-                            bgcolor=color,  # 纯色背景
+                            bgcolor=color,
                             bordercolor=color,
                             borderwidth=1,
                             borderpad=2,
                             yanchor='top',
-                            yshift=-5,  # 稍微向上，避免与 x 轴标签重叠
                             xanchor='center'
                         )
 
+    # 全局布局
     fig.update_xaxes(tickangle=45)
-    fig.update_layout(height=450 * n_cols,  # 适当增高
+    fig.update_layout(height=400 * n_cols,
                       showlegend=False,
                       plot_bgcolor='white',
-                      margin=dict(b=100, t=50))  # 底部留白容纳标签，顶部留给统计卡片
+                      margin=dict(b=80, t=40))
 
     all_viol = pd.concat(all_violations) if all_violations else pd.DataFrame()
     viol_table_html = all_viol.to_html(classes='violation-table', index=False) if not all_viol.empty else "<p>未检测到超出规格的样本。</p>"
+
+    # 生成 HTML，统计卡片放在图表之前
+    stats_section = "\n".join(stats_blocks)
 
     html = f"""<!DOCTYPE html>
 <html lang="zh">
@@ -196,6 +183,9 @@ def generate_html_report(output_path, df, value_configs, label_rules, group_col=
     <style>
         body {{ font-family: 'Microsoft YaHei', Arial, sans-serif; margin: 20px; }}
         h1, h2 {{ color: #2c3e50; }}
+        .stats-row {{ display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0; }}
+        .stat {{ background: #ecf0f1; border-radius: 6px; padding: 6px 12px; font-size: 13px; }}
+        .stat b {{ color: #2c3e50; }}
         .violation-table {{ border-collapse: collapse; width: 100%; margin-top: 10px; }}
         .violation-table th, .violation-table td {{ border: 1px solid #bdc3c7; padding: 8px; text-align: left; }}
         .violation-table th {{ background-color: #f39c12; color: white; }}
@@ -204,6 +194,9 @@ def generate_html_report(output_path, df, value_configs, label_rules, group_col=
 <body>
     <h1>📊 SCT 分析报告</h1>
     <p>生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+    <h2>统计摘要</h2>
+    {stats_section}
+    <h2>分布图</h2>
     {pio.to_html(fig, full_html=False, include_plotlyjs=True)}
     <h2>超规明细</h2>
     {viol_table_html}
