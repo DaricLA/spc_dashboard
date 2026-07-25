@@ -13,7 +13,8 @@ from datetime import datetime
 import core
 from report_generator import generate_html_report
 
-CONFIG_FILE = "configs.json"
+# 配置文件固定为程序同目录下的 sct_config.json
+CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sct_config.json")
 
 class Application(tk.Tk):
     def __init__(self):
@@ -37,21 +38,32 @@ class Application(tk.Tk):
         self.create_config_management()
 
     def _config_path(self):
-        return os.path.join(os.path.dirname(os.path.abspath(__file__)), CONFIG_FILE)
+        return CONFIG_FILE
 
     def _load_all_configs(self):
         path = self._config_path()
-        if os.path.exists(path):
-            try:
-                with open(path, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except:
-                return {}
-        return {}
+        if not os.path.exists(path):
+            messagebox.showinfo("提示", 
+                "未找到配置文件 sct_config.json，请先在程序目录手动创建该文件（内容为 {}）。\n"
+                "之后即可正常使用配置功能。")
+            return {}
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            messagebox.showerror("加载失败", f"读取配置文件出错：{e}")
+            return {}
 
     def _save_all_configs(self):
-        with open(self._config_path(), 'w', encoding='utf-8') as f:
-            json.dump(self.all_configs, f, ensure_ascii=False, indent=2)
+        path = self._config_path()
+        if not os.path.exists(path):
+            messagebox.showwarning("提示", "配置文件 sct_config.json 不存在，请先在程序目录手动创建该文件（内容为 {}）。")
+            return
+        try:
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(self.all_configs, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            messagebox.showerror("保存失败", f"无法写入配置文件：{e}")
 
     def create_widgets(self):
         # 顶部文件选择
@@ -285,7 +297,6 @@ class Application(tk.Tk):
         name = simpledialog.askstring("保存配置", "输入配置名称:")
         if not name:
             return
-        # 收集当前界面配置
         config = {
             'output_dir': self.output_dir.get(),
             'sample_id': self.combo_sid.get(),
@@ -334,7 +345,6 @@ class Application(tk.Tk):
         self.label_rules = config.get('label_rules', [])
         self.refresh_label_listbox()
 
-        # 重建数值列行
         for row in self.value_rows:
             row['frame'].destroy()
         self.value_rows.clear()
