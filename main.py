@@ -1,5 +1,5 @@
 """
-SPC 报告生成器 - SCT 分析，界面美化
+SPC 报告生成器 - SCT 分析，界面美化，单配置文件
 """
 import tkinter as tk
 from tkinter import filedialog, ttk, messagebox, simpledialog, colorchooser
@@ -12,6 +12,8 @@ from datetime import datetime
 
 import core
 from report_generator import generate_html_report
+
+CONFIG_FILE = "configs.json"
 
 class Application(tk.Tk):
     def __init__(self):
@@ -28,8 +30,28 @@ class Application(tk.Tk):
         self.value_configs = []
         self.label_rules = []
 
+        # 加载全局配置
+        self.all_configs = self._load_all_configs()
+
         self.create_widgets()
         self.create_config_management()
+
+    def _config_path(self):
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)), CONFIG_FILE)
+
+    def _load_all_configs(self):
+        path = self._config_path()
+        if os.path.exists(path):
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except:
+                return {}
+        return {}
+
+    def _save_all_configs(self):
+        with open(self._config_path(), 'w', encoding='utf-8') as f:
+            json.dump(self.all_configs, f, ensure_ascii=False, indent=2)
 
     def create_widgets(self):
         # 顶部文件选择
@@ -92,7 +114,7 @@ class Application(tk.Tk):
         f = tk.LabelFrame(parent, text="字段映射（必填）")
         f.pack(fill=tk.X, padx=5, pady=5)
         tk.Label(f, text="样本ID列:").grid(row=0, column=0, sticky="e")
-        self.combo_sid = ttk.Combobox(f, state="readonly", width=30)  # 宽度加倍
+        self.combo_sid = ttk.Combobox(f, state="readonly", width=30)
         self.combo_sid.grid(row=0, column=1, sticky="w")
         tk.Label(f, text="分组列:").grid(row=0, column=2, sticky="e")
         self.combo_grp = ttk.Combobox(f, state="readonly", width=30)
@@ -130,9 +152,9 @@ class Application(tk.Tk):
         row_frame = tk.Frame(self.value_frame, relief=tk.RIDGE, borderwidth=1)
         row_frame.pack(fill=tk.X, pady=2)
 
-        # 数值列选择
+        # 数值列选择（宽度与制程站位一致）
         tk.Label(row_frame, text="数值列:").grid(row=0, column=0, sticky="e")
-        combo_val = ttk.Combobox(row_frame, state="readonly", width=20)  # 宽度加大
+        combo_val = ttk.Combobox(row_frame, state="readonly", width=30)
         combo_val.grid(row=0, column=1, sticky="w")
         if hasattr(self, 'all_columns'):
             combo_val['values'] = self.all_columns
@@ -239,27 +261,22 @@ class Application(tk.Tk):
         self.label_listbox.config(yscrollcommand=sc.set)
         tk.Button(f, text="删除选中规则", command=self.delete_label_rule).pack(pady=5)
 
-    # ---------- 配置管理 ----------
+    # ---------- 配置管理（单文件）----------
     def create_config_management(self):
         frm = tk.Frame(self)
         frm.pack(fill=tk.X, padx=10, pady=5, before=self.notebook)
         tk.Label(frm, text="制程站位:").pack(side=tk.LEFT)
-        self.config_combo = ttk.Combobox(frm, state="readonly", width=30)  # 宽度加大
+        self.config_combo = ttk.Combobox(frm, state="readonly", width=30)
         self.config_combo.pack(side=tk.LEFT, padx=5)
         self.refresh_config_list()
         tk.Button(frm, text="加载", command=self.load_config).pack(side=tk.LEFT, padx=5)
         tk.Button(frm, text="保存", command=self.save_config).pack(side=tk.LEFT, padx=5)
         tk.Button(frm, text="删除", command=self.delete_config).pack(side=tk.LEFT, padx=5)
 
-    def config_dir(self):
-        d = os.path.join(os.path.dirname(os.path.abspath(__file__)), "configs")
-        os.makedirs(d, exist_ok=True)
-        return d
-
     def refresh_config_list(self):
-        cfgs = [os.path.splitext(f)[0] for f in os.listdir(self.config_dir()) if f.endswith('.json')]
-        self.config_combo['values'] = cfgs
-        if cfgs:
+        names = list(self.all_configs.keys())
+        self.config_combo['values'] = names
+        if names:
             self.config_combo.current(0)
         else:
             self.config_combo.set('')
@@ -268,8 +285,8 @@ class Application(tk.Tk):
         name = simpledialog.askstring("保存配置", "输入配置名称:")
         if not name:
             return
-        path = os.path.join(self.config_dir(), f"{name}.json")
-        data = {
+        # 收集当前界面配置
+        config = {
             'output_dir': self.output_dir.get(),
             'sample_id': self.combo_sid.get(),
             'group': self.combo_grp.get(),
@@ -294,37 +311,34 @@ class Application(tk.Tk):
                 'ref_upper': rd['entry_refu'].get(),
                 'ref_lower': rd['entry_refl'].get()
             }
-            data['value_configs'].append(vc)
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+            config['value_configs'].append(vc)
+        self.all_configs[name] = config
+        self._save_all_configs()
         self.refresh_config_list()
         messagebox.showinfo("完成", f"配置已保存为 {name}")
 
     def load_config(self):
         name = self.config_combo.get()
-        if not name:
+        if not name or name not in self.all_configs:
+            messagebox.showwarning("警告", "请先选择有效配置")
             return
-        path = os.path.join(self.config_dir(), f"{name}.json")
-        if not os.path.exists(path):
-            messagebox.showerror("错误", "文件不存在")
-            return
-        with open(path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        self.output_dir.set(data.get('output_dir', ''))
-        self.combo_sid.set(data.get('sample_id', ''))
-        self.combo_grp.set(data.get('group', ''))
-        pp = data.get('preprocess', {})
+        config = self.all_configs[name]
+        self.output_dir.set(config.get('output_dir', ''))
+        self.combo_sid.set(config.get('sample_id', ''))
+        self.combo_grp.set(config.get('group', ''))
+        pp = config.get('preprocess', {})
         self.var_del_empty.set(pp.get('del_empty', True))
         self.var_del_dup.set(pp.get('del_dup', True))
         self.var_fillna.set(pp.get('fill_na', '不处理'))
         self.var_outlier.set(pp.get('outlier', 0.0))
-        self.label_rules = data.get('label_rules', [])
+        self.label_rules = config.get('label_rules', [])
         self.refresh_label_listbox()
 
+        # 重建数值列行
         for row in self.value_rows:
             row['frame'].destroy()
         self.value_rows.clear()
-        vconfigs = data.get('value_configs', [])
+        vconfigs = config.get('value_configs', [])
         if not vconfigs:
             self.add_value_row()
         else:
@@ -354,12 +368,12 @@ class Application(tk.Tk):
 
     def delete_config(self):
         name = self.config_combo.get()
-        if not name:
+        if not name or name not in self.all_configs:
+            messagebox.showwarning("警告", "请先选择有效配置")
             return
         if messagebox.askyesno("确认", f"确定要删除配置 '{name}' 吗？"):
-            path = os.path.join(self.config_dir(), f"{name}.json")
-            if os.path.exists(path):
-                os.remove(path)
+            del self.all_configs[name]
+            self._save_all_configs()
             self.refresh_config_list()
             messagebox.showinfo("完成", f"配置已删除")
 
