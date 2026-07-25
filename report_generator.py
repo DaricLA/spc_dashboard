@@ -1,5 +1,5 @@
 """
-生成 SCT 离线 HTML 报告：模块化布局，规格线标注外置，标签修复，卡片高亮
+生成 SCT 离线 HTML 报告：模块化布局，规格线标注外置，标签方块紧贴 x 轴，卡片高亮
 """
 import plotly.graph_objects as go
 import plotly.io as pio
@@ -85,22 +85,13 @@ def generate_html_report(output_path, df, value_configs, label_rules, group_col=
         ppk_val = cap['Ppk']
         defect_rate = cap['defect_rate']
 
-        # 根据阈值确定背景颜色
         def get_highlight_style(value, threshold=1.33, is_defect=False):
             if value is None:
                 return ''
             if is_defect:
-                # 不良率 > 0 高亮为红色
-                if value > 0:
-                    return 'background-color: #ffcccc;'
-                else:
-                    return 'background-color: #ccffcc;'
+                return 'background-color: #ffcccc;' if value > 0 else 'background-color: #ccffcc;'
             else:
-                # Cpk/Ppk ≤ threshold 红色，否则绿色
-                if value <= threshold:
-                    return 'background-color: #ffcccc;'
-                else:
-                    return 'background-color: #ccffcc;'
+                return 'background-color: #ffcccc;' if value <= threshold else 'background-color: #ccffcc;'
 
         cpk_style = get_highlight_style(cpk_val)
         ppk_style = get_highlight_style(ppk_val)
@@ -201,77 +192,84 @@ def generate_html_report(output_path, df, value_configs, label_rules, group_col=
 def _create_single_chart(df, value_col, specs, label_rules, group_col, viol_df):
     fig = go.Figure()
     groups = sorted(df[group_col].unique())
+    y_min = df[value_col].min()
+    y_max = df[value_col].max()
+    y_range = y_max - y_min if y_max != y_min else 1.0
 
-    # 小提琴背景
+    # 固定底部预留空白：增加 y 轴范围，让方块紧贴 x 轴标签上方
+    y_lower = y_min - 0.15 * y_range   # 轴下限
+    y_upper = y_max + 0.05 * y_range   # 轴上限
+    block_y = y_min - 0.07 * y_range   # 方块 y 坐标，靠近轴下限但高于轴标签
+
+    # ----- 1. 底层标签方块（先添加）-----
+    if label_rules:
+        color_groups = {}
+        for rule in label_rules:
+            op = rule['operator']
+            val = rule['value']
+            color = rule['color']
+            matched_groups = []
+            for grp in groups:
+                grp_str = str(grp)
+                if (op == 'equals' and grp_str == val) or (op == 'contains' and val in grp_str):
+                    matched_groups.append(grp)
+            if matched_groups:
+                if color not in color_groups:
+                    color_groups[color] = []
+                color_groups[color].extend(matched_groups)
+
+        for color, x_list in color_groups.items():
+            unique_x = list(dict.fromkeys(x_list))
+            fig.add_trace(go.Scatter(
+                x=unique_x,
+                y=[block_y] * len(unique_x),
+                mode='markers',
+                marker=dict(symbol='square', size=10, color=color, line=dict(width=1, color=color)),
+                showlegend=False,
+                hoverinfo='none'
+            ))
+
+    # ----- 2. 小提琴背景 -----
     fig.add_trace(go.Violin(x=df[group_col], y=df[value_col], name=value_col,
                             line_color='lightblue', fillcolor='lightblue', opacity=0.3,
                             points=False, box_visible=False, meanline_visible=False,
                             showlegend=False))
-    # 正常散点
+
+    # ----- 3. 正常散点 -----
     normal = df[~df.index.isin(viol_df.index)] if not viol_df.empty else df
     fig.add_trace(go.Scatter(x=normal[group_col], y=normal[value_col], mode='markers',
                              marker=dict(color='#1f77b4', size=5), showlegend=False))
-    # 超规点
+
+    # ----- 4. 超规散点 -----
     if not viol_df.empty:
         fig.add_trace(go.Scatter(x=viol_df[group_col], y=viol_df['value'], mode='markers',
                                  marker=dict(symbol='x', color='red', size=10, line=dict(width=2)),
                                  text=viol_df['超规描述'], showlegend=False))
 
-    # 绘制规格线和参考线，但不使用 add_hline 的 annotation，改用独立标注
-    y_max = df[value_col].max()
-    y_min = df[value_col].min()
-    x_range = df[group_col].nunique()
-    # 右边距数值
-    right_x = groups[-1] if len(groups) > 0 else 0
-
-    def add_spec_annotation(y_val, text, color):
+    # ----- 5. 规格线和参考线（带右侧标注）-----
+    def add_spec_line(y_val, text, color):
         if y_val is not None:
             fig.add_hline(y=y_val, line_dash="dash", line_color=color)
             fig.add_annotation(
-                x=right_x, y=y_val,
-                xref='x', yref='y',
+                xref='paper', yref='y',
+                x=1.02, y=y_val,
                 text=text,
                 showarrow=False,
                 xanchor='left',
                 yanchor='middle',
-                font=dict(color=color, size=10),
-                ax=40,  # 向右偏移像素，使其位于绘图区外
-                ay=0
+                font=dict(color=color, size=10)
             )
 
-    add_spec_annotation(specs.get('usl'), f"USL:{specs['usl']}" if specs.get('usl') is not None else None, "red")
-    add_spec_annotation(specs.get('lsl'), f"LSL:{specs['lsl']}" if specs.get('lsl') is not None else None, "red")
-    add_spec_annotation(specs.get('ref_upper'), f"UCL:{specs['ref_upper']}" if specs.get('ref_upper') is not None else None, "orange")
-    add_spec_annotation(specs.get('ref_lower'), f"LCL:{specs['ref_lower']}" if specs.get('ref_lower') is not None else None, "orange")
+    add_spec_line(specs.get('usl'), f"USL:{specs['usl']}", "red")
+    add_spec_line(specs.get('lsl'), f"LSL:{specs['lsl']}", "red")
+    add_spec_line(specs.get('ref_upper'), f"UCL:{specs['ref_upper']}", "orange")
+    add_spec_line(specs.get('ref_lower'), f"LCL:{specs['ref_lower']}", "orange")
 
-    # 自定义标签：修复“包含”逻辑，所有匹配分组都添加色块
-    if label_rules:
-        for rule in label_rules:
-            op = rule['operator']
-            val = rule['value']
-            color = rule['color']
-            for grp in groups:
-                grp_str = str(grp)
-                if (op == 'equals' and grp_str == val) or (op == 'contains' and val in grp_str):
-                    fig.add_annotation(
-                        x=grp,
-                        y=0,
-                        yref='paper',
-                        text="",
-                        showarrow=False,
-                        bgcolor=color,
-                        bordercolor=color,
-                        borderwidth=1,
-                        width=10,
-                        height=10,
-                        xanchor='center',
-                        yanchor='bottom',
-                        yshift=15
-                    )
-
+    # 设置 y 轴范围，固定底部空白
+    fig.update_yaxes(range=[y_lower, y_upper])
     fig.update_xaxes(tickangle=45)
     fig.update_layout(height=400,
-                      margin=dict(l=40, r=120, t=40, b=80),  # 增大右边距
+                      margin=dict(l=40, r=120, t=40, b=80),
                       plot_bgcolor='white',
                       showlegend=False)
     return fig
