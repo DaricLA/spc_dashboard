@@ -39,7 +39,6 @@ class Application(tk.Tk):
         self.value_configs = []
         self.label_rules = []
 
-        # 加载全局配置
         self.all_configs = self._load_all_configs()
 
         self.create_widgets()
@@ -74,7 +73,9 @@ class Application(tk.Tk):
         # 顶部文件选择
         top = tk.Frame(self)
         top.pack(fill=tk.X, padx=10, pady=5)
-        tk.Button(top, text="选择文件", command=self.select_files).pack(side=tk.LEFT)
+        # 修改按钮文字和样式
+        tk.Button(top, text="选择多个SCT文件", command=self.select_files,
+                  bg="#2ecc71", fg="white", font=('Arial', 9, 'bold')).pack(side=tk.LEFT)
         self.lbl_count = tk.Label(top, text="未选择文件")
         self.lbl_count.pack(side=tk.LEFT, padx=10)
         self.btn_merge = tk.Button(top, text="仅合并文件", command=self.merge_only, state="disabled",
@@ -285,7 +286,9 @@ class Application(tk.Tk):
         self.config_combo = ttk.Combobox(frm, state="readonly", width=30)
         self.config_combo.pack(side=tk.LEFT, padx=5)
         self.refresh_config_list()
-        tk.Button(frm, text="加载", command=self.load_config).pack(side=tk.LEFT, padx=5)
+        # 加载按钮改为绿色
+        tk.Button(frm, text="加载", command=self.load_config,
+                  bg="#2ecc71", fg="white", font=('Arial', 9, 'bold')).pack(side=tk.LEFT, padx=5)
         tk.Button(frm, text="保存", command=self.save_config).pack(side=tk.LEFT, padx=5)
         tk.Button(frm, text="删除", command=self.delete_config).pack(side=tk.LEFT, padx=5)
 
