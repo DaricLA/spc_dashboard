@@ -1,5 +1,5 @@
 """
-生成 SCT 离线 HTML 报告：模块化布局（统计卡片与图表），色块标签 + 图例，内嵌 Plotly.js
+生成 SCT 离线 HTML 报告：模块化布局，色块标签贴近x轴，超规数值高亮
 """
 import plotly.graph_objects as go
 import plotly.io as pio
@@ -65,7 +65,33 @@ def _detect_spec_violations(df, value_col, specs):
     if specs.get('lsl'):
         viol.loc[series < specs['lsl'], '超规描述'] += '超LSL;'
     viol['超规描述'] = viol['超规描述'].str.rstrip(';')
-    return viol[['sample_id', 'group', value_col, '超规描述']]
+    # 返回时保留原始数值列名称，以及标识列
+    result = viol[['sample_id', 'group', value_col, '超规描述']].copy()
+    result.rename(columns={value_col: 'value'}, inplace=True)  # 统一命名为 value 以便表格处理
+    result['数值列'] = value_col
+    return result
+
+def _generate_violation_table_html(all_viol):
+    """生成超规明细的 HTML 表格，超规数值红色加粗"""
+    if all_viol.empty:
+        return "<p>未检测到超出规格的样本。</p>"
+    # 需要显示的列：样本ID, 分组, 数值列名称, 数值, 超规描述
+    # 合并后 all_viol 包含: sample_id, group, value, 超规描述, 数值列
+    html = '<table class="violation-table"><thead><tr><th>样本ID</th><th>分组</th><th>数值列</th><th>测量值</th><th>超规描述</th></tr></thead><tbody>'
+    for _, row in all_viol.iterrows():
+        sid = row['sample_id'] if not pd.isna(row['sample_id']) else ''
+        grp = row['group'] if not pd.isna(row['group']) else ''
+        col_name = row['数值列'] if not pd.isna(row['数值列']) else ''
+        value = row['value']
+        desc = row['超规描述'] if not pd.isna(row['超规描述']) else ''
+        # 如果该行有超规描述，高亮数值
+        if desc:
+            value_cell = f'<td><span style="color:red; font-weight:bold;">{value}</span></td>'
+        else:
+            value_cell = f'<td>{value}</td>'
+        html += f'<tr><td>{sid}</td><td>{grp}</td><td>{col_name}</td>{value_cell}<td>{desc}</td></tr>'
+    html += '</tbody></table>'
+    return html
 
 def generate_html_report(output_path, df, value_configs, label_rules, group_col='group'):
     all_violations = []
@@ -76,10 +102,8 @@ def generate_html_report(output_path, df, value_configs, label_rules, group_col=
         specs = vc['specs']
         cap = _compute_capability(df, col, specs)
         viol_df = _detect_spec_violations(df, col, specs)
-        viol_df['数值列'] = col
         all_violations.append(viol_df)
 
-        # 统计卡片
         cpk_val = f"{cap['Cpk']:.3f}" if cap['Cpk'] is not None else "N/A"
         ppk_val = f"{cap['Ppk']:.3f}" if cap['Ppk'] is not None else "N/A"
         defect_val = f"{cap['defect_rate']:.4f}% ({cap['dppm']:.0f} DPPM)" if cap['defect_rate'] is not None else "N/A"
@@ -96,18 +120,14 @@ def generate_html_report(output_path, df, value_configs, label_rules, group_col=
             <span class="stat">不良率: {defect_val}</span>
         </div>"""
 
-        # 图例
         legend_html = ""
         if label_rules:
-            legend_items = []
+            items = []
             for rule in label_rules:
-                legend_items.append(
-                    f'<span style="display:inline-block;width:12px;height:12px;background:{rule["color"]};margin-right:4px;"></span>{rule["label"]}')
-            legend_html = f'<div class="legend">{" ".join(legend_items)}</div>'
+                items.append(f'<span style="display:inline-block;width:12px;height:12px;background:{rule["color"]};margin-right:4px;"></span>{rule["label"]}')
+            legend_html = f'<div class="legend">{" ".join(items)}</div>'
 
-        # 生成图表
         fig = _create_single_chart(df, col, specs, label_rules, group_col, viol_df)
-        # 第一个图表内嵌 plotly.js，后续不重复
         include_js = True if idx == 0 else False
         chart_div = pio.to_html(fig, full_html=False, include_plotlyjs=include_js)
 
@@ -121,8 +141,8 @@ def generate_html_report(output_path, df, value_configs, label_rules, group_col=
         </section>"""
         sections.append(section)
 
-    all_viol = pd.concat(all_violations) if all_violations else pd.DataFrame()
-    viol_table_html = all_viol.to_html(classes='violation-table', index=False) if not all_viol.empty else "<p>未检测到超出规格的样本。</p>"
+    all_viol = pd.concat(all_violations, ignore_index=True) if all_violations else pd.DataFrame()
+    viol_table_html = _generate_violation_table_html(all_viol)
 
     full_html = f"""<!DOCTYPE html>
 <html lang="zh">
@@ -189,13 +209,8 @@ def _create_single_chart(df, value_col, specs, label_rules, group_col, viol_df):
         fig.add_hline(y=specs['ref_lower'], line_dash="dot", line_color="orange",
                       annotation_text=f"LCL:{specs['ref_lower']}", annotation_position="right")
 
-    # 色块标签
+    # 自定义标签：贴近 x 轴的小方块（正方形）
     if label_rules:
-        y_min = df[value_col].min()
-        y_range = df[value_col].max() - y_min
-        offset = y_range * 0.03 if y_range != 0 else 0.1
-        y_pos = y_min - offset
-
         for rule in label_rules:
             op = rule['operator']
             val = rule['value']
@@ -203,19 +218,23 @@ def _create_single_chart(df, value_col, specs, label_rules, group_col, viol_df):
             for grp in groups:
                 grp_str = str(grp)
                 if (op == 'equals' and grp_str == val) or (op == 'contains' and val in grp_str):
+                    # 放在图表底部，使用 paper 坐标
                     fig.add_annotation(
-                        x=grp, y=y_pos,
-                        text="",
+                        x=grp,
+                        y=0,                    # 图表底部
+                        yref='paper',
+                        text="",                # 无文字
                         showarrow=False,
                         bgcolor=color,
                         bordercolor=color,
                         borderwidth=1,
-                        width=8,
-                        height=4,
+                        width=10,               # 正方形宽度
+                        height=10,              # 正方形高度
                         xanchor='center',
-                        yanchor='top'
+                        yanchor='bottom',
+                        yshift=15               # 向上偏移 15 像素，避免压住 x 轴线
                     )
-                    break
+                    break  # 匹配到一个即可
 
     fig.update_xaxes(tickangle=45)
     fig.update_layout(height=400, margin=dict(l=40, r=40, t=40, b=80),
