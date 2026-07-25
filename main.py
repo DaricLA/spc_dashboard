@@ -1,10 +1,11 @@
 """
-SPC 报告生成器 - SCT 分析，界面美化，单配置文件
+SPC 报告生成器 - SCT 分析，界面美化，配置文件自动管理
 """
 import tkinter as tk
 from tkinter import filedialog, ttk, messagebox, simpledialog, colorchooser
 import threading
 import os
+import sys
 import json
 import pandas as pd
 import numpy as np
@@ -13,8 +14,15 @@ from datetime import datetime
 import core
 from report_generator import generate_html_report
 
-# 配置文件固定为程序同目录下的 sct_config.json
-CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sct_config.json")
+# 配置文件路径：自动定位到 exe/脚本所在目录
+def get_config_path():
+    if getattr(sys, 'frozen', False):
+        app_dir = os.path.dirname(sys.executable)
+    else:
+        app_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(app_dir, "sct_config.json")
+
+CONFIG_FILE = get_config_path()
 
 class Application(tk.Tk):
     def __init__(self):
@@ -37,15 +45,15 @@ class Application(tk.Tk):
         self.create_widgets()
         self.create_config_management()
 
-    def _config_path(self):
-        return CONFIG_FILE
-
     def _load_all_configs(self):
-        path = self._config_path()
+        path = CONFIG_FILE
         if not os.path.exists(path):
-            messagebox.showinfo("提示", 
-                "未找到配置文件 sct_config.json，请先在程序目录手动创建该文件（内容为 {}）。\n"
-                "之后即可正常使用配置功能。")
+            # 自动创建空配置文件
+            try:
+                with open(path, 'w', encoding='utf-8') as f:
+                    json.dump({}, f)
+            except:
+                pass
             return {}
         try:
             with open(path, 'r', encoding='utf-8') as f:
@@ -55,15 +63,14 @@ class Application(tk.Tk):
             return {}
 
     def _save_all_configs(self):
-        path = self._config_path()
-        if not os.path.exists(path):
-            messagebox.showwarning("提示", "配置文件 sct_config.json 不存在，请先在程序目录手动创建该文件（内容为 {}）。")
-            return
+        path = CONFIG_FILE
         try:
+            # 自动创建目录（虽然通常不需要）
+            os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(self.all_configs, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            messagebox.showerror("保存失败", f"无法写入配置文件：{e}")
+            messagebox.showerror("保存失败", f"无法写入配置文件：{e}\n请确保程序所在目录可写或移动程序到其他位置。")
 
     def create_widgets(self):
         # 顶部文件选择
@@ -164,7 +171,6 @@ class Application(tk.Tk):
         row_frame = tk.Frame(self.value_frame, relief=tk.RIDGE, borderwidth=1)
         row_frame.pack(fill=tk.X, pady=2)
 
-        # 数值列选择（宽度与制程站位一致）
         tk.Label(row_frame, text="数值列:").grid(row=0, column=0, sticky="e")
         combo_val = ttk.Combobox(row_frame, state="readonly", width=30)
         combo_val.grid(row=0, column=1, sticky="w")
@@ -273,7 +279,7 @@ class Application(tk.Tk):
         self.label_listbox.config(yscrollcommand=sc.set)
         tk.Button(f, text="删除选中规则", command=self.delete_label_rule).pack(pady=5)
 
-    # ---------- 配置管理（单文件）----------
+    # ---------- 配置管理 ----------
     def create_config_management(self):
         frm = tk.Frame(self)
         frm.pack(fill=tk.X, padx=10, pady=5, before=self.notebook)
