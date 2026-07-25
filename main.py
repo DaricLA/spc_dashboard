@@ -40,8 +40,9 @@ class Application(tk.Tk):
         tk.Button(top, text="选择文件", command=self.select_files).pack(side=tk.LEFT)
         self.lbl_count = tk.Label(top, text="未选择文件")
         self.lbl_count.pack(side=tk.LEFT, padx=10)
-        tk.Button(top, text="仅合并文件", command=self.merge_only, state="disabled",
-                  bg="#3498db", fg="white").pack(side=tk.RIGHT, padx=5)
+        self.btn_merge = tk.Button(top, text="仅合并文件", command=self.merge_only, state="disabled",
+                                   bg="#3498db", fg="white")
+        self.btn_merge.pack(side=tk.RIGHT, padx=5)
 
         # 输出目录
         out_f = tk.Frame(self)
@@ -122,7 +123,7 @@ class Application(tk.Tk):
         tk.Button(btn_frame, text="添加数值列", command=self.add_value_row).pack(side=tk.LEFT)
         tk.Button(btn_frame, text="删除选中列", command=self.delete_value_row).pack(side=tk.LEFT, padx=5)
 
-        # 使用 Treeview 显示已添加的数值列（简化，这里直接用 Frame + 列表管理）
+        # 使用 Frame 容器
         self.value_frame = tk.Frame(f)
         self.value_frame.pack(fill=tk.BOTH, expand=True)
         self.value_rows = []  # 存储每个数值列对应的 Frame 和变量
@@ -133,7 +134,6 @@ class Application(tk.Tk):
     def add_value_row(self):
         row_frame = tk.Frame(self.value_frame, relief=tk.RIDGE, borderwidth=1)
         row_frame.pack(fill=tk.X, pady=2)
-        idx = len(self.value_rows)
 
         # 数值列选择
         tk.Label(row_frame, text="数值列:").grid(row=0, column=0, sticky="e")
@@ -194,13 +194,12 @@ class Application(tk.Tk):
         if len(self.value_rows) <= 1:
             messagebox.showwarning("警告", "至少保留一个数值列")
             return
-        # 简单删除最后一个，实际可让用户选择
+        # 删除最后一个（可改进为选择删除）
         last = self.value_rows.pop()
         last['frame'].destroy()
 
     def toggle_spec_row(self, row_frame):
         """根据选择禁用/启用输入框"""
-        # 找到该行的 row_data
         for rd in self.value_rows:
             if rd['frame'] == row_frame:
                 if rd['usl_choice'].get() == "列":
@@ -337,7 +336,7 @@ class Application(tk.Tk):
         self.value_rows.clear()
         vconfigs = data.get('value_configs', [])
         if not vconfigs:
-            self.add_value_row()  # 至少一行
+            self.add_value_row()
         else:
             for vc in vconfigs:
                 self.add_value_row()
@@ -356,7 +355,7 @@ class Application(tk.Tk):
                 rd['entry_refl'].delete(0, tk.END)
                 rd['entry_refl'].insert(0, vc.get('ref_lower', ''))
                 self.toggle_spec_row(rd['frame'])
-        # 更新下拉框（需要文件已选，否则无法设置列名，这里只赋值文本）
+        # 更新下拉框（需要文件已选）
         if hasattr(self, 'all_columns'):
             for rd in self.value_rows:
                 rd['combo_val']['values'] = self.all_columns
@@ -385,7 +384,7 @@ class Application(tk.Tk):
         self.header_rows = [core.auto_detect_header(p) for p in self.file_paths]
         self.lbl_count.config(text=f"已选 {len(files)} 个文件")
         self.btn_gen.config(state="normal")
-        self.btn_merge.config(state="normal") if hasattr(self, 'btn_merge') else None
+        self.btn_merge.config(state="normal")
         self.refresh_file_list()
         if not self.output_dir.get():
             self.output_dir.set(os.path.dirname(self.file_paths[0]))
@@ -444,11 +443,13 @@ class Application(tk.Tk):
 
     def run_analysis(self, out_dir):
         try:
-            # 构建基本映射
+            # 构建基本映射（分组列必填）
             mapping = {
                 'sample_id': self.combo_sid.get(),
                 'group': self.combo_grp.get()
             }
+            if not mapping['group']:
+                raise ValueError("请选择分组列")
             # 读取并合并原始数据
             df = core.process_data(self.file_paths, self.header_rows, mapping)
             # 预处理
@@ -459,6 +460,9 @@ class Application(tk.Tk):
                                       fill_na=self.var_fillna.get())
             if df.empty:
                 raise ValueError("预处理后无数据")
+            # 确认 group 列存在
+            if 'group' not in df.columns:
+                raise ValueError("数据中无分组列，请检查字段映射")
 
             # 收集数值列配置
             value_configs = []
@@ -475,9 +479,9 @@ class Application(tk.Tk):
             # 获取标签规则
             label_rules = self.label_rules
 
-            # 生成报告
+            # 生成报告（固定使用 'group' 列）
             out_path = os.path.join(out_dir, f"SPC_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html")
-            generate_html_report(out_path, df, value_configs, label_rules, mapping['group'])
+            generate_html_report(out_path, df, value_configs, label_rules, group_col='group')
             import webbrowser
             webbrowser.open(f"file:///{out_path}")
             self.after(0, lambda: self.analysis_done(out_path))
