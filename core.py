@@ -1,27 +1,21 @@
 """
-核心统计：表头检测、数据合并、预处理、子组统计、控制限、判异、能力分析
-支持 CSV 和 Excel 文件，自动处理编码问题
+核心统计：表头检测、数据合并、预处理、分组统计、超规检测、能力计算
+支持 CSV 和 Excel，自动处理编码
 """
 import pandas as pd
 import numpy as np
 import os
-from constants import get_constants
 
 def _read_csv_robust(filepath, skiprows=0):
-    """
-    尝试多种编码读取 CSV，返回 DataFrame。
-    """
     encodings = ['utf-8', 'gbk', 'gb2312', 'latin-1']
     for enc in encodings:
         try:
             return pd.read_csv(filepath, skiprows=skiprows, encoding=enc)
         except (UnicodeDecodeError, UnicodeError):
             continue
-    # 如果全部失败，用 utf-8 并忽略错误
     return pd.read_csv(filepath, skiprows=skiprows, encoding='utf-8', errors='replace')
 
 def auto_detect_header(filepath, max_rows=3):
-    """自动检测表头行号，支持 CSV 和 Excel"""
     ext = os.path.splitext(filepath)[1].lower()
     best_row = 0
     best_score = 1.0
@@ -31,43 +25,32 @@ def auto_detect_header(filepath, max_rows=3):
                 df = _read_csv_robust(filepath, skiprows=row)
                 if df.empty:
                     continue
-                # 假设第一行为表头候选，检查该行是否更像标题
-                # 简化：直接检查读取后第一行各列的数据类型
-                row_vals = df.columns.tolist()
+                vals = df.columns.tolist()
             elif ext in ('.xlsx', '.xls'):
                 df = pd.read_excel(filepath, header=None, nrows=1, skiprows=row)
                 if df.empty:
                     continue
-                row_vals = df.iloc[0].dropna().tolist()
+                vals = df.iloc[0].dropna().tolist()
             else:
                 return 0
-
-            if not row_vals:
+            if not vals:
                 continue
-            num_count = sum(isinstance(x, (int, float)) for x in row_vals if not isinstance(x, bool))
-            ratio = num_count / len(row_vals)
+            num_cnt = sum(isinstance(x, (int, float)) for x in vals if not isinstance(x, bool))
+            ratio = num_cnt / len(vals)
             if ratio < 0.5 and ratio < best_score:
                 best_score = ratio
                 best_row = row
-        except Exception:
+        except:
             continue
     return best_row
 
 def process_data(files, header_rows, mapping_config):
-    """
-    读取并合并多个文件，支持 CSV 和 Excel。
-    files: 文件路径列表
-    header_rows: 每文件对应的表头行（0-based）
-    mapping_config: 字段映射字典
-    返回合并 DataFrame 和 specs 字典
-    """
     dfs = []
     for f, hrow in zip(files, header_rows):
         ext = os.path.splitext(f)[1].lower()
         if ext == '.csv':
             df = _read_csv_robust(f, skiprows=hrow)
         elif ext in ('.xlsx', '.xls'):
-            # Excel 默认第一个 sheet
             df = pd.read_excel(f, header=hrow)
         else:
             raise ValueError(f"不支持的文件格式: {ext}")
@@ -75,220 +58,115 @@ def process_data(files, header_rows, mapping_config):
         dfs.append(df)
     combined = pd.concat(dfs, ignore_index=True)
 
-    # 重命名关键列
-    rename_map = {
+    # 重命名关键列（样本ID和分组列固定）
+    rename = {
         mapping_config['sample_id']: 'sample_id',
-        mapping_config['group']: 'group',
-        mapping_config['value']: 'value'
+        mapping_config['group']: 'group'
     }
-    combined = combined.rename(columns=rename_map)
-    combined['value'] = pd.to_numeric(combined['value'], errors='coerce')
+    combined.rename(columns=rename, inplace=True)
 
-    # 提取规格限（支持列名或直接数值）
-    def _get_spec(val):
-        if val is None:
-            return None
-        if isinstance(val, (int, float)):
-            return float(val)
-        if isinstance(val, str):
-            try:
-                return float(val)
-            except ValueError:
-                if val in combined.columns:
-                    s = combined[val].dropna()
-                    if len(s) > 0:
-                        return float(s.iloc[0])
-        return None
-
-    specs = {
-        'usl': _get_spec(mapping_config.get('usl')),
-        'lsl': _get_spec(mapping_config.get('lsl')),
-        'ref_upper': _get_spec(mapping_config.get('ref_upper')),
-        'ref_lower': _get_spec(mapping_config.get('ref_lower'))
-    }
-    return combined, specs
+    # 数值列可能有多个，不在此处重命名，而是在后续处理中单独提取
+    return combined
 
 def preprocess_data(df, delete_empty=True, delete_duplicates=True, outlier_sigma=None, fill_na='不处理'):
     if delete_empty:
-        df = df.dropna(how='all')
-    if delete_duplicates:
-        df = df.drop_duplicates(subset='sample_id', keep='first')
+        df.dropna(how='all', inplace=True)
+    if delete_duplicates and 'sample_id' in df.columns:
+        df.drop_duplicates(subset='sample_id', keep='first', inplace=True)
     if fill_na != '不处理':
-        if fill_na == '均值':
-            df['value'] = df['value'].fillna(df['value'].mean())
-        elif fill_na == '中位数':
-            df['value'] = df['value'].fillna(df['value'].median())
-        elif fill_na == '删除该行':
-            df = df.dropna(subset=['value'])
+        for col in df.columns:
+            if col not in ['sample_id', 'group', '_file_source']:
+                if fill_na == '均值':
+                    df[col].fillna(df[col].mean(), inplace=True)
+                elif fill_na == '中位数':
+                    df[col].fillna(df[col].median(), inplace=True)
+                elif fill_na == '删除该行':
+                    df.dropna(subset=[col], inplace=True)
     if outlier_sigma and outlier_sigma > 0:
-        mean = df['value'].mean()
-        std = df['value'].std()
-        lower = mean - outlier_sigma * std
-        upper = mean + outlier_sigma * std
-        df = df[(df['value'] >= lower) & (df['value'] <= upper)]
+        numeric_cols = df.select_dtypes(include=[np.number]).columns
+        for col in numeric_cols:
+            if col in ('sample_id', 'group', '_file_source'):
+                continue
+            mean = df[col].mean()
+            std = df[col].std()
+            lower = mean - outlier_sigma * std
+            upper = mean + outlier_sigma * std
+            df = df[(df[col] >= lower) & (df[col] <= upper)]
     return df
 
-def subgroup_statistics(df, group_col='group', value_col='value'):
-    grouped = df.groupby(group_col)
-    stats = grouped[value_col].agg(['mean', 'std', 'count', 'min', 'max'])
+def subgroup_statistics(df, value_col, group_col='group'):
+    """按分组统计给定数值列的均值、标准差、大小、极差"""
+    grouped = df.groupby(group_col)[value_col]
+    stats = grouped.agg(['mean', 'std', 'count', 'min', 'max'])
     stats['range'] = stats['max'] - stats['min']
-    stats = stats.rename(columns={
-        'mean': 'subgroup_mean',
-        'std': 'subgroup_std',
-        'count': 'subgroup_size',
-        'min': 'min',
-        'max': 'max',
-        'range': 'subgroup_range'
-    }).reset_index()
+    stats.rename(columns={'mean': 'mean', 'std': 'std', 'count': 'size', 'min': 'min', 'max': 'max', 'range': 'range'}, inplace=True)
+    stats.reset_index(inplace=True)
     return stats
 
-def control_limits(subgroup_stats, chart_type='X-S'):
-    n_avg = int(round(subgroup_stats['subgroup_size'].mean()))
-    const = get_constants(n_avg)
-    total_n = subgroup_stats['subgroup_size'].sum()
-    overall_mean = (subgroup_stats['subgroup_mean'] * subgroup_stats['subgroup_size']).sum() / total_n
-
-    if chart_type == 'X-R':
-        R_bar = (subgroup_stats['subgroup_range'] * subgroup_stats['subgroup_size']).sum() / total_n
-        X_cl = overall_mean
-        X_ucl = X_cl + const['A2'] * R_bar
-        X_lcl = X_cl - const['A2'] * R_bar
-        R_cl = R_bar
-        R_ucl = const['D4'] * R_bar
-        R_lcl = const['D3'] * R_bar
-        return {'X': {'CL': X_cl, 'UCL': X_ucl, 'LCL': X_lcl},
-                'R': {'CL': R_cl, 'UCL': R_ucl, 'LCL': R_lcl}}
-    else:  # X-S
-        ni = subgroup_stats['subgroup_size']
-        si = subgroup_stats['subgroup_std']
-        pooled_var = ((ni - 1) * si**2).sum() / (ni - 1).sum()
-        S_bar = np.sqrt(pooled_var)
-        X_cl = overall_mean
-        X_ucl = X_cl + const['A3'] * S_bar
-        X_lcl = X_cl - const['A3'] * S_bar
-        S_cl = S_bar
-        S_ucl = const['B4'] * S_bar
-        S_lcl = const['B3'] * S_bar
-        return {'X': {'CL': X_cl, 'UCL': X_ucl, 'LCL': X_lcl},
-                'S': {'CL': S_cl, 'UCL': S_ucl, 'LCL': S_lcl}}
-
-def detect_violations(df, subgroup_stats, cl_limits, chart_type, rules_enabled):
-    merged = df.merge(subgroup_stats[['group','subgroup_mean','subgroup_std','subgroup_size']], on='group', how='left')
-    overall_mean = cl_limits['X']['CL']
-    UCL = cl_limits['X']['UCL']
-    LCL = cl_limits['X']['LCL']
-    one_sigma = (UCL - overall_mean) / 3
-
-    merged['violation'] = ''
-
-    if rules_enabled.get('rule1', True):
-        merged.loc[merged['value'] > UCL, 'violation'] += 'Rule1(UCL);'
-        merged.loc[merged['value'] < LCL, 'violation'] += 'Rule1(LCL);'
-
-    if rules_enabled.get('rule2', False):
-        side = (merged['value'] > overall_mean).astype(int)
-        run_id = (side != side.shift()).cumsum()
-        run_len = side.groupby(run_id).cumcount() + 1
-        merged.loc[(run_len >= 9) & (side == 1), 'violation'] += 'Rule2(上);'
-        merged.loc[(run_len >= 9) & (side == 0), 'violation'] += 'Rule2(下);'
-
-    if rules_enabled.get('rule3', False):
-        diff = merged['value'].diff()
-        inc = diff > 0
-        dec = diff < 0
-        inc_run = inc.groupby((inc != inc.shift()).cumsum()).cumcount() + 1
-        dec_run = dec.groupby((dec != dec.shift()).cumsum()).cumcount() + 1
-        merged.loc[inc_run >= 5, 'violation'] += 'Rule3(递增);'
-        merged.loc[dec_run >= 5, 'violation'] += 'Rule3(递减);'
-
-    if rules_enabled.get('rule4', False):
-        s = np.sign(merged['value'].diff()).fillna(0)
-        alt = (s * s.shift(-1) == -1).astype(int)
-        alt_run = alt.groupby((alt != alt.shift()).cumsum()).cumcount() + 1
-        merged.loc[alt_run >= 13, 'violation'] += 'Rule4;'
-
-    if rules_enabled.get('rule5', False):
-        upper2 = overall_mean + 2 * one_sigma
-        lower2 = overall_mean - 2 * one_sigma
-        above2 = merged['value'] > upper2
-        below2 = merged['value'] < lower2
-        merged.loc[above2.rolling(3, min_periods=3).sum() >= 2, 'violation'] += 'Rule5(上);'
-        merged.loc[below2.rolling(3, min_periods=3).sum() >= 2, 'violation'] += 'Rule5(下);'
-
-    if rules_enabled.get('rule6', False):
-        upper1 = overall_mean + one_sigma
-        lower1 = overall_mean - one_sigma
-        above1 = merged['value'] > upper1
-        below1 = merged['value'] < lower1
-        merged.loc[above1.rolling(5, min_periods=5).sum() >= 4, 'violation'] += 'Rule6(上);'
-        merged.loc[below1.rolling(5, min_periods=5).sum() >= 4, 'violation'] += 'Rule6(下);'
-
-    if rules_enabled.get('rule7', False):
-        within = (merged['value'] >= overall_mean - one_sigma) & (merged['value'] <= overall_mean + one_sigma)
-        merged.loc[within.rolling(15, min_periods=15).sum() == 15, 'violation'] += 'Rule7;'
-
-    if rules_enabled.get('rule8', False):
-        outside = (merged['value'] < overall_mean - one_sigma) | (merged['value'] > overall_mean + one_sigma)
-        merged.loc[outside.rolling(8, min_periods=8).sum() == 8, 'violation'] += 'Rule8;'
-
-    merged['violation'] = merged['violation'].str.rstrip(';')
-    return merged
-
-def process_capability(df, specs, subgroup_stats, chart_type):
+def compute_capability(df, value_col, specs):
+    """
+    计算给定数值列的能力指标（基于整体标准差，不再区分组内/整体，因为无控制图）
+    返回字典：mean, std, min, max, Cpk, Ppk, defect_rate, dppm 等
+    """
+    series = df[value_col].dropna()
+    mean = series.mean()
+    std = series.std(ddof=1)
+    min_val = series.min()
+    max_val = series.max()
     usl = specs.get('usl')
     lsl = specs.get('lsl')
-    overall_mean = df['value'].mean()
-    overall_std = df['value'].std(ddof=1)
 
-    # 组内标准差
-    if chart_type == 'X-R':
-        R_bar = (subgroup_stats['subgroup_range'] * subgroup_stats['subgroup_size']).sum() / subgroup_stats['subgroup_size'].sum()
-        n_avg = int(round(subgroup_stats['subgroup_size'].mean()))
-        const = get_constants(n_avg)
-        sigma_within = R_bar / const['d2']
+    result = {
+        'value_col': value_col,
+        'mean': mean,
+        'std': std,
+        'min': min_val,
+        'max': max_val,
+        'total': len(series)
+    }
+
+    if usl is not None or lsl is not None:
+        # 使用整体标准差计算 Ppk 类指标（这里统一用 Ppk 代替 Cpk）
+        if usl is not None and lsl is not None:
+            ppu = (usl - mean) / (3 * std) if std > 0 else np.inf
+            ppl = (mean - lsl) / (3 * std) if std > 0 else np.inf
+            ppk = min(ppu, ppl)
+            defect_rate = ((series > usl) | (series < lsl)).sum() / len(series) * 100
+            result.update({'PPU': ppu, 'PPL': ppl, 'Ppk': ppk, 'Cpk': ppk})  # 统一显示为 Cpk/Ppk
+        elif usl is not None:
+            ppu = (usl - mean) / (3 * std) if std > 0 else np.inf
+            ppk = ppu
+            defect_rate = (series > usl).sum() / len(series) * 100
+            result.update({'PPU': ppu, 'Ppk': ppk, 'Cpk': ppk})
+        elif lsl is not None:
+            ppl = (mean - lsl) / (3 * std) if std > 0 else np.inf
+            ppk = ppl
+            defect_rate = (series < lsl).sum() / len(series) * 100
+            result.update({'PPL': ppl, 'Ppk': ppk, 'Cpk': ppk})
+        result['defect_rate'] = defect_rate
+        result['dppm'] = defect_rate * 10000  # 1% = 10000 DPPM
     else:
-        ni = subgroup_stats['subgroup_size']
-        si = subgroup_stats['subgroup_std']
-        pooled_var = ((ni - 1) * si**2).sum() / (ni - 1).sum()
-        S_bar = np.sqrt(pooled_var)
-        n_avg = int(round(subgroup_stats['subgroup_size'].mean()))
-        if n_avg < 2:
-            n_avg = 2
-        const = get_constants(n_avg)
-        sigma_within = S_bar / const['c4']
+        result['Cpk'] = None
+        result['Ppk'] = None
+        result['defect_rate'] = None
+        result['dppm'] = None
+    return result
 
-    res = {'overall_mean': overall_mean, 'overall_std': overall_std, 'sigma_within': sigma_within}
-
-    if usl is not None and lsl is not None:
-        CPU = (usl - overall_mean) / (3 * sigma_within) if sigma_within > 0 else np.inf
-        CPL = (overall_mean - lsl) / (3 * sigma_within) if sigma_within > 0 else np.inf
-        Cpk = min(CPU, CPL)
-        PPU = (usl - overall_mean) / (3 * overall_std) if overall_std > 0 else np.inf
-        PPL = (overall_mean - lsl) / (3 * overall_std) if overall_std > 0 else np.inf
-        Ppk = min(PPU, PPL)
-        res.update({'Cpk': Cpk, 'Ppk': Ppk, 'CPU': CPU, 'CPL': CPL, 'PPU': PPU, 'PPL': PPL})
-        above = (df['value'] > usl).sum()
-        below = (df['value'] < lsl).sum()
-        res['defect_rate'] = (above + below) / len(df) * 100
-    elif usl is not None:
-        CPU = (usl - overall_mean) / (3 * sigma_within) if sigma_within > 0 else np.inf
-        Cpk = CPU
-        PPU = (usl - overall_mean) / (3 * overall_std) if overall_std > 0 else np.inf
-        Ppk = PPU
-        res.update({'Cpk': Cpk, 'Ppk': Ppk, 'CPU': CPU, 'PPU': PPU})
-        above = (df['value'] > usl).sum()
-        res['defect_rate'] = above / len(df) * 100
-    elif lsl is not None:
-        CPL = (overall_mean - lsl) / (3 * sigma_within) if sigma_within > 0 else np.inf
-        Cpk = CPL
-        PPL = (overall_mean - lsl) / (3 * overall_std) if overall_std > 0 else np.inf
-        Ppk = PPL
-        res.update({'Cpk': Cpk, 'Ppk': Ppk, 'CPL': CPL, 'PPL': PPL})
-        below = (df['value'] < lsl).sum()
-        res['defect_rate'] = below / len(df) * 100
-    else:
-        res['Cpk'] = None
-        res['Ppk'] = None
-        res['defect_rate'] = None
-
-    return res
+def detect_spec_violations(df, value_col, specs):
+    """返回超出规格限的样本 DataFrame"""
+    if specs.get('usl') is None and specs.get('lsl') is None:
+        return pd.DataFrame()
+    series = df[value_col]
+    mask = pd.Series(False, index=df.index)
+    if specs.get('usl'):
+        mask |= series > specs['usl']
+    if specs.get('lsl'):
+        mask |= series < specs['lsl']
+    viol_df = df[mask].copy()
+    viol_df['超规描述'] = ''
+    if specs.get('usl'):
+        viol_df.loc[series > specs['usl'], '超规描述'] += '超USL;'
+    if specs.get('lsl'):
+        viol_df.loc[series < specs['lsl'], '超规描述'] += '超LSL;'
+    viol_df['超规描述'] = viol_df['超规描述'].str.rstrip(';')
+    return viol_df[['sample_id', 'group', value_col, '超规描述']]
