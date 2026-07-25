@@ -1,5 +1,5 @@
 """
-生成 SCT 离线 HTML 报告：模块化布局（统计卡片与图表），色块标签 + 图例
+生成 SCT 离线 HTML 报告：模块化布局（统计卡片与图表），色块标签 + 图例，内嵌 Plotly.js
 """
 import plotly.graph_objects as go
 import plotly.io as pio
@@ -69,9 +69,9 @@ def _detect_spec_violations(df, value_col, specs):
 
 def generate_html_report(output_path, df, value_configs, label_rules, group_col='group'):
     all_violations = []
-    sections = []   # 每个数值列生成一个 HTML section
+    sections = []
 
-    for vc in value_configs:
+    for idx, vc in enumerate(value_configs):
         col = vc['value_col']
         specs = vc['specs']
         cap = _compute_capability(df, col, specs)
@@ -79,7 +79,7 @@ def generate_html_report(output_path, df, value_configs, label_rules, group_col=
         viol_df['数值列'] = col
         all_violations.append(viol_df)
 
-        # 构建统计卡片
+        # 统计卡片
         cpk_val = f"{cap['Cpk']:.3f}" if cap['Cpk'] is not None else "N/A"
         ppk_val = f"{cap['Ppk']:.3f}" if cap['Ppk'] is not None else "N/A"
         defect_val = f"{cap['defect_rate']:.4f}% ({cap['dppm']:.0f} DPPM)" if cap['defect_rate'] is not None else "N/A"
@@ -101,14 +101,16 @@ def generate_html_report(output_path, df, value_configs, label_rules, group_col=
         if label_rules:
             legend_items = []
             for rule in label_rules:
-                legend_items.append(f'<span style="display:inline-block;width:12px;height:12px;background:{rule["color"]};margin-right:4px;"></span>{rule["label"]}')
+                legend_items.append(
+                    f'<span style="display:inline-block;width:12px;height:12px;background:{rule["color"]};margin-right:4px;"></span>{rule["label"]}')
             legend_html = f'<div class="legend">{" ".join(legend_items)}</div>'
 
-        # 生成该数值列的图表
+        # 生成图表
         fig = _create_single_chart(df, col, specs, label_rules, group_col, viol_df)
-        chart_div = pio.to_html(fig, full_html=False, include_plotlyjs=False)
+        # 第一个图表内嵌 plotly.js，后续不重复
+        include_js = True if idx == 0 else False
+        chart_div = pio.to_html(fig, full_html=False, include_plotlyjs=include_js)
 
-        # 组装模块
         section = f"""
         <section class="module">
             <div class="module-header">
@@ -119,11 +121,9 @@ def generate_html_report(output_path, df, value_configs, label_rules, group_col=
         </section>"""
         sections.append(section)
 
-    # 超规明细表
     all_viol = pd.concat(all_violations) if all_violations else pd.DataFrame()
     viol_table_html = all_viol.to_html(classes='violation-table', index=False) if not all_viol.empty else "<p>未检测到超出规格的样本。</p>"
 
-    # 生成最终 HTML，包含 plotly.js 一次
     full_html = f"""<!DOCTYPE html>
 <html lang="zh">
 <head>
@@ -157,26 +157,25 @@ def generate_html_report(output_path, df, value_configs, label_rules, group_col=
         f.write(full_html)
 
 def _create_single_chart(df, value_col, specs, label_rules, group_col, viol_df):
-    """为单个数值列创建图表（小提琴背景 + 散点 + 色块标签）"""
     fig = go.Figure()
-
     groups = sorted(df[group_col].unique())
+
     # 小提琴背景
     fig.add_trace(go.Violin(x=df[group_col], y=df[value_col], name=value_col,
                             line_color='lightblue', fillcolor='lightblue', opacity=0.3,
                             points=False, box_visible=False, meanline_visible=False,
                             showlegend=False))
-    # 正常散点（蓝色）
+    # 正常散点
     normal = df[~df.index.isin(viol_df.index)] if not viol_df.empty else df
     fig.add_trace(go.Scatter(x=normal[group_col], y=normal[value_col], mode='markers',
                              marker=dict(color='#1f77b4', size=5), showlegend=False))
-    # 超规点红色 X
+    # 超规点
     if not viol_df.empty:
         fig.add_trace(go.Scatter(x=viol_df[group_col], y=viol_df[value_col], mode='markers',
                                  marker=dict(symbol='x', color='red', size=10, line=dict(width=2)),
                                  text=viol_df['超规描述'], showlegend=False))
 
-    # 规格线和参考线
+    # 规格线
     if specs.get('usl') is not None:
         fig.add_hline(y=specs['usl'], line_dash="dash", line_color="red",
                       annotation_text=f"USL:{specs['usl']}", annotation_position="right")
@@ -190,9 +189,8 @@ def _create_single_chart(df, value_col, specs, label_rules, group_col, viol_df):
         fig.add_hline(y=specs['ref_lower'], line_dash="dot", line_color="orange",
                       annotation_text=f"LCL:{specs['ref_lower']}", annotation_position="right")
 
-    # 自定义标签：在 x 轴标签上方添加色块
+    # 色块标签
     if label_rules:
-        # 计算 y 参考位置（数据最小值下方一点）
         y_min = df[value_col].min()
         y_range = df[value_col].max() - y_min
         offset = y_range * 0.03 if y_range != 0 else 0.1
@@ -205,10 +203,8 @@ def _create_single_chart(df, value_col, specs, label_rules, group_col, viol_df):
             for grp in groups:
                 grp_str = str(grp)
                 if (op == 'equals' and grp_str == val) or (op == 'contains' and val in grp_str):
-                    # 添加一个小色块
                     fig.add_annotation(
-                        x=grp,
-                        y=y_pos,
+                        x=grp, y=y_pos,
                         text="",
                         showarrow=False,
                         bgcolor=color,
@@ -219,15 +215,9 @@ def _create_single_chart(df, value_col, specs, label_rules, group_col, viol_df):
                         xanchor='center',
                         yanchor='top'
                     )
-                    # 确保该分组至少有一个色块即可，不重复添加多个
                     break
 
-    # 布局调整
     fig.update_xaxes(tickangle=45)
-    fig.update_layout(
-        height=400,
-        margin=dict(l=40, r=40, t=40, b=80),
-        plot_bgcolor='white',
-        showlegend=False
-    )
+    fig.update_layout(height=400, margin=dict(l=40, r=40, t=40, b=80),
+                      plot_bgcolor='white', showlegend=False)
     return fig
