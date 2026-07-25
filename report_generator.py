@@ -70,7 +70,6 @@ def _detect_spec_violations(df, value_col, specs):
 
 def generate_html_report(output_path, df, value_configs, label_rules, group_col='group'):
     n_cols = len(value_configs)
-    # 增加垂直间距，避免重叠
     fig = make_subplots(rows=n_cols, cols=1,
                         subplot_titles=[f"<b>{vc['value_col']}</b>" for vc in value_configs],
                         vertical_spacing=0.12)
@@ -85,7 +84,7 @@ def generate_html_report(output_path, df, value_configs, label_rules, group_col=
         viol_df['数值列'] = col
         all_violations.append(viol_df)
 
-        # 构造统计文本（方框形式）
+        # 构建统计文本
         cpk_str = f"{cap['Cpk']:.3f}" if cap.get('Cpk') is not None else "N/A"
         defect_str = ""
         if cap.get('defect_rate') is not None:
@@ -96,20 +95,26 @@ def generate_html_report(output_path, df, value_configs, label_rules, group_col=
                      f"均值:{cap['mean']:.4f}  最小值:{cap['min']:.4f}  最大值:{cap['max']:.4f}  "
                      f"标准差:{cap['std']:.4f}  Cpk:{cpk_str}  {defect_str}")
 
-        # 在每个子图顶部添加统计卡片（使用 annotation 放在子图上方）
+        # 正确的轴引用
+        xref_domain = 'x domain' if i == 0 else f'x{i+1} domain'
+        yref_domain = 'y domain' if i == 0 else f'y{i+1} domain'
+
+        # 在子图顶部添加统计卡片
         fig.add_annotation(
-            xref=f'x{i+1} domain', yref=f'y{i+1} domain',
-            x=0.5, y=1.08, text=stat_text, showarrow=False,
+            xref=xref_domain, yref=yref_domain,
+            x=0.5, y=1.08,
+            text=stat_text,
+            showarrow=False,
             font=dict(size=11, color='#2c3e50', family='Microsoft YaHei'),
             align='center',
             bgcolor='#ecf0f1',
             bordercolor='#bdc3c7',
             borderwidth=1,
-            borderpad=5,
-            row=i+1, col=1
+            borderpad=5
         )
 
         groups = sorted(df[group_col].unique())
+
         # 小提琴背景
         fig.add_trace(go.Violin(x=df[group_col], y=df[col], name=col,
                                 line_color='lightblue', fillcolor='lightblue', opacity=0.3,
@@ -143,7 +148,7 @@ def generate_html_report(output_path, df, value_configs, label_rules, group_col=
             fig.add_hline(y=specs['ref_lower'], line_dash="dot", line_color="orange", row=i+1, col=1,
                           annotation_text="LCL", annotation_position="right")
 
-        # 自定义标签：放置在底部（x轴标签上方），使用 paper 坐标
+        # 自定义标签：放置在子图底部（x轴标签上方）
         if label_rules:
             for rule in label_rules:
                 op = rule['operator']
@@ -153,9 +158,9 @@ def generate_html_report(output_path, df, value_configs, label_rules, group_col=
                 for grp in groups:
                     grp_str = str(grp)
                     if (op == 'equals' and grp_str == val) or (op == 'contains' and val in grp_str):
-                        # 在子图底部添加标签，y 参考子图 paper 坐标 0，向上偏移一点
                         fig.add_annotation(
-                            x=grp, y=0, xref=f'x{i+1}', yref=f'y{i+1} domain',
+                            xref=xref_domain, yref=yref_domain,
+                            x=grp, y=0,
                             text=f"<b>{label}</b>",
                             showarrow=False,
                             font=dict(color=color, size=11, family='Microsoft YaHei'),
@@ -164,19 +169,17 @@ def generate_html_report(output_path, df, value_configs, label_rules, group_col=
                             borderwidth=2,
                             borderpad=3,
                             yanchor='top',
-                            yshift=-10,  # 稍微向上，不压住 x 轴标签
-                            xanchor='center',
-                            row=i+1, col=1
+                            yshift=-10,
+                            xanchor='center'
                         )
 
-    # 设置 x 轴标签倾斜，增加底部边距
+    # x轴标签倾斜，增加底部边距
     fig.update_xaxes(tickangle=45)
     fig.update_layout(height=400 * n_cols,
                       showlegend=False,
                       plot_bgcolor='white',
-                      margin=dict(b=80))  # 底部留白，容纳标签
+                      margin=dict(b=80))
 
-    # 超规明细表
     all_viol = pd.concat(all_violations) if all_violations else pd.DataFrame()
     viol_table_html = all_viol.to_html(classes='violation-table', index=False) if not all_viol.empty else "<p>未检测到超出规格的样本。</p>"
 
