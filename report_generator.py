@@ -1,6 +1,5 @@
 """
-生成 SCT 离线 HTML 报告：模块化布局，规格线标注外置，标签方块紧贴 x 轴，y 轴自适应，卡片高亮
-内部按列计算子组统计，分组数 >30 跳过小提琴
+生成 SCT 离线 HTML 报告：模块化布局，规格线标注外置，标签方块紧贴 x 轴，y 轴自适应，统计卡片优化
 """
 import plotly.graph_objects as go
 import plotly.io as pio
@@ -141,9 +140,10 @@ def generate_html_report(output_path, df, value_configs, label_rules, group_col=
         ppk_display = f"{ppk_val:.3f}" if ppk_val is not None else "N/A"
         defect_display = f"{defect_rate:.4f}% ({cap['dppm']:.0f} DPPM)" if defect_rate is not None else "N/A"
 
+        # 统计卡片：第一张卡片使用蓝色背景、白色加粗字体
         stats_html = f"""
         <div class="stats-row">
-            <span class="stat"><b>{col}</b></span>
+            <span class="stat" style="background-color: #1f77b4; color: white; font-weight: bold;">{col}</span>
             <span class="stat">均值: {cap['mean']:.4f}</span>
             <span class="stat">最小值: {cap['min']:.4f}</span>
             <span class="stat">最大值: {cap['max']:.4f}</span>
