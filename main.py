@@ -1,5 +1,5 @@
 """
-SPC 报告生成器 - SCT 分析，界面美化，配置文件自动管理
+SPC 报告生成器 - SCT 分析，界面美化，配置文件自动管理，进度条
 """
 import tkinter as tk
 from tkinter import filedialog, ttk, messagebox, simpledialog, colorchooser
@@ -7,6 +7,7 @@ import threading
 import os
 import sys
 import json
+import queue
 import pandas as pd
 import numpy as np
 from datetime import datetime
@@ -14,7 +15,6 @@ from datetime import datetime
 import core
 from report_generator import generate_html_report
 
-# 配置文件路径：自动定位到 exe/脚本所在目录
 def get_config_path():
     if getattr(sys, 'frozen', False):
         app_dir = os.path.dirname(sys.executable)
@@ -35,11 +35,12 @@ class Application(tk.Tk):
         self.file_paths = []
         self.header_rows = []
         self.output_dir = tk.StringVar()
-
         self.value_configs = []
         self.label_rules = []
-
         self.all_configs = self._load_all_configs()
+
+        self.queue = queue.Queue()
+        self.after(100, self.process_queue)
 
         self.create_widgets()
         self.create_config_management()
@@ -70,7 +71,6 @@ class Application(tk.Tk):
             messagebox.showerror("保存失败", f"无法写入配置文件：{e}\n请确保程序所在目录可写或移动程序到其他位置。")
 
     def create_widgets(self):
-        # 顶部文件选择
         top = tk.Frame(self)
         top.pack(fill=tk.X, padx=10, pady=5)
         tk.Button(top, text="选择多个SCT文件", command=self.select_files,
@@ -81,14 +81,12 @@ class Application(tk.Tk):
                                    bg="#3498db", fg="white", font=('Arial', 9, 'bold'))
         self.btn_merge.pack(side=tk.RIGHT, padx=5)
 
-        # 输出目录
         out_f = tk.Frame(self)
         out_f.pack(fill=tk.X, padx=10, pady=5)
         tk.Label(out_f, text="输出目录:").pack(side=tk.LEFT)
         tk.Entry(out_f, textvariable=self.output_dir, width=60).pack(side=tk.LEFT, padx=5)
         tk.Button(out_f, text="浏览", command=self.browse_output_dir).pack(side=tk.LEFT)
 
-        # 文件列表滚动区
         list_cont = tk.Frame(self)
         list_cont.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         self.canvas = tk.Canvas(list_cont)
@@ -100,26 +98,21 @@ class Application(tk.Tk):
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # 笔记本页
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
-        # 基本设置页
         page1 = tk.Frame(self.notebook)
         self.notebook.add(page1, text="基本设置")
         self.create_basic_section(page1)
 
-        # 数值列管理页
         page2 = tk.Frame(self.notebook)
         self.notebook.add(page2, text="数值列设置")
         self.create_value_col_section(page2)
 
-        # 标签规则页
         page3 = tk.Frame(self.notebook)
         self.notebook.add(page3, text="标签规则")
         self.create_label_section(page3)
 
-        # 生成按钮
         self.btn_gen = tk.Button(self, text="生成 SCT 分析报告", command=self.start_analysis,
                                  bg="#2ecc71", fg="white", height=2, state="disabled",
                                  font=('Arial', 11, 'bold'))
@@ -137,7 +130,6 @@ class Application(tk.Tk):
         self.combo_grp = ttk.Combobox(f, state="readonly", width=30)
         self.combo_grp.grid(row=0, column=3, sticky="w")
 
-        # 预处理选项
         pf = tk.LabelFrame(parent, text="预处理")
         pf.pack(fill=tk.X, padx=5, pady=5)
         self.var_del_empty = tk.BooleanVar(value=True)
@@ -154,7 +146,6 @@ class Application(tk.Tk):
     def create_value_col_section(self, parent):
         f = tk.LabelFrame(parent, text="数值列管理（可添加多个）")
         f.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-
         btn_frame = tk.Frame(f)
         btn_frame.pack(fill=tk.X)
         tk.Button(btn_frame, text="添加数值列", command=self.add_value_row).pack(side=tk.LEFT)
@@ -168,7 +159,6 @@ class Application(tk.Tk):
     def add_value_row(self):
         row_frame = tk.Frame(self.value_frame, relief=tk.RIDGE, borderwidth=1)
         row_frame.pack(fill=tk.X, pady=2)
-
         tk.Label(row_frame, text="数值列:").grid(row=0, column=0, sticky="e")
         combo_val = ttk.Combobox(row_frame, state="readonly", width=30)
         combo_val.grid(row=0, column=1, sticky="w")
@@ -177,7 +167,6 @@ class Application(tk.Tk):
             if self.all_columns:
                 combo_val.current(0)
 
-        # USL
         tk.Label(row_frame, text="USL:").grid(row=0, column=2, sticky="e")
         usl_choice = tk.StringVar(value="手动")
         tk.Radiobutton(row_frame, text="列", variable=usl_choice, value="列").grid(row=0, column=3)
@@ -188,7 +177,6 @@ class Application(tk.Tk):
         entry_usl.grid(row=0, column=6)
         usl_choice.trace_add('write', lambda *a, r=row_frame: self.toggle_spec_row(r))
 
-        # LSL
         tk.Label(row_frame, text="LSL:").grid(row=1, column=2, sticky="e")
         lsl_choice = tk.StringVar(value="手动")
         tk.Radiobutton(row_frame, text="列", variable=lsl_choice, value="列").grid(row=1, column=3)
@@ -199,7 +187,6 @@ class Application(tk.Tk):
         entry_lsl.grid(row=1, column=6)
         lsl_choice.trace_add('write', lambda *a, r=row_frame: self.toggle_spec_row(r))
 
-        # 参考
         tk.Label(row_frame, text="参考上限:").grid(row=2, column=0, sticky="e")
         entry_refu = tk.Entry(row_frame, width=8)
         entry_refu.grid(row=2, column=1)
@@ -277,7 +264,6 @@ class Application(tk.Tk):
         self.label_listbox.config(yscrollcommand=sc.set)
         tk.Button(f, text="删除选中规则", command=self.delete_label_rule).pack(pady=5)
 
-    # ---------- 配置管理 ----------
     def create_config_management(self):
         frm = tk.Frame(self)
         frm.pack(fill=tk.X, padx=10, pady=5, before=self.notebook)
@@ -395,7 +381,6 @@ class Application(tk.Tk):
             self.refresh_config_list()
             messagebox.showinfo("完成", f"配置已删除")
 
-    # ---------- 文件操作 ----------
     def select_files(self):
         files = filedialog.askopenfilenames(filetypes=[("支持格式", "*.csv *.xlsx *.xls")])
         if not files:
@@ -445,7 +430,6 @@ class Application(tk.Tk):
     def update_header_row(self, idx, val):
         self.header_rows[idx] = val
 
-    # ---------- 分析逻辑 ----------
     def start_analysis(self):
         if not self.file_paths:
             messagebox.showwarning("警告", "请先选择文件")
@@ -455,11 +439,26 @@ class Application(tk.Tk):
             messagebox.showwarning("警告", "请设置输出目录")
             return
         os.makedirs(out_dir, exist_ok=True)
+
+        # 进度窗口
+        self.progress_win = tk.Toplevel(self)
+        self.progress_win.title("正在生成报告...")
+        self.progress_win.geometry("300x100")
+        self.progress_win.resizable(False, False)
+        self.progress_var = tk.DoubleVar()
+        self.progress_bar = ttk.Progressbar(self.progress_win, variable=self.progress_var, maximum=100, length=250)
+        self.progress_bar.pack(pady=20)
+        self.progress_label = tk.Label(self.progress_win, text="准备中...")
+        self.progress_label.pack()
+        self.progress_win.grab_set()
+
         self.status.config(text="分析中...")
         self.btn_gen.config(state="disabled")
         threading.Thread(target=self.run_analysis, args=(out_dir,), daemon=True).start()
 
     def run_analysis(self, out_dir):
+        def update_progress(percent, text):
+            self.queue.put((percent, text))
         try:
             mapping = {
                 'sample_id': self.combo_sid.get(),
@@ -467,7 +466,11 @@ class Application(tk.Tk):
             }
             if not mapping['group']:
                 raise ValueError("请选择分组列")
+
+            update_progress(5, "读取数据中...")
             df = core.process_data(self.file_paths, self.header_rows, mapping)
+
+            update_progress(10, "预处理数据...")
             df = core.preprocess_data(df,
                                       delete_empty=self.var_del_empty.get(),
                                       delete_duplicates=self.var_del_dup.get(),
@@ -476,9 +479,8 @@ class Application(tk.Tk):
             if df.empty:
                 raise ValueError("预处理后无数据")
             if 'group' not in df.columns:
-                raise ValueError("数据中无分组列，请检查字段映射")
+                raise ValueError("数据中无分组列")
 
-            # 收集数值列配置
             value_configs = []
             for rd in self.value_rows:
                 val_col = rd['combo_val'].get()
@@ -490,26 +492,22 @@ class Application(tk.Tk):
             if not value_configs:
                 raise ValueError("至少需要一个有效的数值列")
 
-            # 计算子组统计（用于组内标准差估计）
             subgroup_stats = core.subgroup_statistics(df, 'group', 'value')
             sizes = subgroup_stats['subgroup_size']
             equal_size = (sizes.nunique() == 1)
-            # 自动确定图类型用于能力计算（X-R 或 X-S）
-            if equal_size:
-                chart_type = 'X-R'
-            else:
-                chart_type = 'X-S'
-
-            label_rules = self.label_rules
+            chart_type = 'X-R' if equal_size else 'X-S'
 
             out_path = os.path.join(out_dir, f"SCT_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html")
-            generate_html_report(out_path, df, value_configs, label_rules, group_col='group',
-                                 subgroup_stats=subgroup_stats, chart_type=chart_type)
-            import webbrowser
-            webbrowser.open(f"file:///{out_path}")
+            generate_html_report(out_path, df, value_configs, self.label_rules,
+                                 group_col='group', subgroup_stats=subgroup_stats,
+                                 chart_type=chart_type,
+                                 progress_callback=update_progress)
+            update_progress(100, "完成！")
             self.after(0, lambda: self.analysis_done(out_path))
         except Exception as e:
             self.after(0, lambda: self.analysis_error(str(e)))
+        finally:
+            self.after(2000, self.close_progress)
 
     def _extract_specs(self, rd, df):
         def get_val(choice, combo, entry):
@@ -550,7 +548,21 @@ class Application(tk.Tk):
         self.btn_gen.config(state="normal")
         messagebox.showerror("错误", f"分析出错：{msg}")
 
-    # ---------- 合并文件 ----------
+    def close_progress(self):
+        if hasattr(self, 'progress_win') and self.progress_win.winfo_exists():
+            self.progress_win.destroy()
+
+    def process_queue(self):
+        try:
+            while True:
+                percent, text = self.queue.get_nowait()
+                self.progress_var.set(percent)
+                self.progress_label.config(text=text)
+        except queue.Empty:
+            pass
+        finally:
+            self.after(100, self.process_queue)
+
     def merge_only(self):
         out_dir = self.output_dir.get().strip()
         if not out_dir:
@@ -580,7 +592,6 @@ class Application(tk.Tk):
         except Exception as e:
             self.after(0, lambda: messagebox.showerror("错误", str(e)))
 
-    # ---------- 标签规则辅助 ----------
     def pick_color(self, entry):
         color = colorchooser.askcolor()[1]
         if color:
