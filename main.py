@@ -1,5 +1,5 @@
 """
-SPC 报告生成器 - SCT 分析，界面美化，配置文件自动管理，进度条
+SPC 报告生成器 - SCT 分析，进度条，修复多列子组统计
 """
 import tkinter as tk
 from tkinter import filedialog, ttk, messagebox, simpledialog, colorchooser
@@ -440,7 +440,6 @@ class Application(tk.Tk):
             return
         os.makedirs(out_dir, exist_ok=True)
 
-        # 进度窗口
         self.progress_win = tk.Toplevel(self)
         self.progress_win.title("正在生成报告...")
         self.progress_win.geometry("300x100")
@@ -492,22 +491,18 @@ class Application(tk.Tk):
             if not value_configs:
                 raise ValueError("至少需要一个有效的数值列")
 
-            subgroup_stats = core.subgroup_statistics(df, 'group', 'value')
-            sizes = subgroup_stats['subgroup_size']
-            equal_size = (sizes.nunique() == 1)
-            chart_type = 'X-R' if equal_size else 'X-S'
+            # 不再预先计算全局子组统计，改为在 report_generator 内部按列计算
 
             out_path = os.path.join(out_dir, f"SCT_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html")
             generate_html_report(out_path, df, value_configs, self.label_rules,
-                                 group_col='group', subgroup_stats=subgroup_stats,
-                                 chart_type=chart_type,
+                                 group_col='group',
                                  progress_callback=update_progress)
             update_progress(100, "完成！")
             self.after(0, lambda: self.analysis_done(out_path))
         except Exception as e:
             self.after(0, lambda: self.analysis_error(str(e)))
         finally:
-            self.after(2000, self.close_progress)
+            self.after(1500, self.close_progress)
 
     def _extract_specs(self, rd, df):
         def get_val(choice, combo, entry):
