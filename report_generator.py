@@ -1,45 +1,76 @@
 """
-生成 SCT 离线 HTML 报告：模块化布局，规格线标注外置，标签方块紧贴 x 轴，卡片高亮
+生成 SCT 离线 HTML 报告：模块化布局，规格线标注外置，标签方块紧贴 x 轴，y 轴自适应，卡片高亮
+支持 Cpk（组内）和 Ppk（整体）独立计算
 """
 import plotly.graph_objects as go
 import plotly.io as pio
 from datetime import datetime
 import pandas as pd
 import numpy as np
+from constants import get_constants
 
-def _compute_capability(df, value_col, specs):
+def _compute_capability(df, value_col, specs, subgroup_stats, chart_type='X-R'):
+    """计算短期能力 Cpk (组内) 和长期绩效 Ppk (整体)"""
     series = df[value_col].dropna()
     mean = series.mean()
-    std = series.std(ddof=1)
+    overall_std = series.std(ddof=1)   # 整体标准差
     min_val = series.min()
     max_val = series.max()
     usl = specs.get('usl')
     lsl = specs.get('lsl')
+
+    # 组内标准差估计
+    if chart_type == 'X-R':
+        # R̄ / d2
+        R_bar = (subgroup_stats['subgroup_range'] * subgroup_stats['subgroup_size']).sum() / subgroup_stats['subgroup_size'].sum()
+        n_avg = int(round(subgroup_stats['subgroup_size'].mean()))
+        const = get_constants(n_avg)
+        sigma_within = R_bar / const['d2']
+    else:  # X-S
+        ni = subgroup_stats['subgroup_size']
+        si = subgroup_stats['subgroup_std']
+        pooled_var = ((ni - 1) * si**2).sum() / (ni - 1).sum()
+        S_bar = np.sqrt(pooled_var)
+        n_avg = int(round(subgroup_stats['subgroup_size'].mean()))
+        if n_avg < 2:
+            n_avg = 2
+        const = get_constants(n_avg)
+        sigma_within = S_bar / const['c4']
+
     result = {
         'value_col': value_col,
         'mean': mean,
-        'std': std,
+        'overall_std': overall_std,
+        'sigma_within': sigma_within,
         'min': min_val,
         'max': max_val,
         'total': len(series)
     }
+
     if usl is not None or lsl is not None:
         if usl is not None and lsl is not None:
-            ppu = (usl - mean) / (3 * std) if std > 0 else np.inf
-            ppl = (mean - lsl) / (3 * std) if std > 0 else np.inf
-            ppk = min(ppu, ppl)
+            CPU = (usl - mean) / (3 * sigma_within) if sigma_within > 0 else np.inf
+            CPL = (mean - lsl) / (3 * sigma_within) if sigma_within > 0 else np.inf
+            Cpk = min(CPU, CPL)
+            PPU = (usl - mean) / (3 * overall_std) if overall_std > 0 else np.inf
+            PPL = (mean - lsl) / (3 * overall_std) if overall_std > 0 else np.inf
+            Ppk = min(PPU, PPL)
             defect_rate = ((series > usl) | (series < lsl)).sum() / len(series) * 100
-            result.update({'PPU': ppu, 'PPL': ppl, 'Ppk': ppk, 'Cpk': ppk})
+            result.update({'CPU': CPU, 'CPL': CPL, 'Cpk': Cpk, 'PPU': PPU, 'PPL': PPL, 'Ppk': Ppk})
         elif usl is not None:
-            ppu = (usl - mean) / (3 * std) if std > 0 else np.inf
-            ppk = ppu
+            CPU = (usl - mean) / (3 * sigma_within) if sigma_within > 0 else np.inf
+            Cpk = CPU
+            PPU = (usl - mean) / (3 * overall_std) if overall_std > 0 else np.inf
+            Ppk = PPU
             defect_rate = (series > usl).sum() / len(series) * 100
-            result.update({'PPU': ppu, 'Ppk': ppk, 'Cpk': ppk})
+            result.update({'CPU': CPU, 'Cpk': Cpk, 'PPU': PPU, 'Ppk': Ppk})
         elif lsl is not None:
-            ppl = (mean - lsl) / (3 * std) if std > 0 else np.inf
-            ppk = ppl
+            CPL = (mean - lsl) / (3 * sigma_within) if sigma_within > 0 else np.inf
+            Cpk = CPL
+            PPL = (mean - lsl) / (3 * overall_std) if overall_std > 0 else np.inf
+            Ppk = PPL
             defect_rate = (series < lsl).sum() / len(series) * 100
-            result.update({'PPL': ppl, 'Ppk': ppk, 'Cpk': ppk})
+            result.update({'CPL': CPL, 'Cpk': Cpk, 'PPL': PPL, 'Ppk': Ppk})
         result['defect_rate'] = defect_rate
         result['dppm'] = defect_rate * 10000
     else:
@@ -70,14 +101,15 @@ def _detect_spec_violations(df, value_col, specs):
     result['数值列'] = value_col
     return result
 
-def generate_html_report(output_path, df, value_configs, label_rules, group_col='group'):
+def generate_html_report(output_path, df, value_configs, label_rules, group_col='group',
+                         subgroup_stats=None, chart_type='X-R'):
     all_violations = []
     sections = []
 
     for idx, vc in enumerate(value_configs):
         col = vc['value_col']
         specs = vc['specs']
-        cap = _compute_capability(df, col, specs)
+        cap = _compute_capability(df, col, specs, subgroup_stats, chart_type)
         viol_df = _detect_spec_violations(df, col, specs)
         all_violations.append(viol_df)
 
@@ -107,7 +139,7 @@ def generate_html_report(output_path, df, value_configs, label_rules, group_col=
             <span class="stat">均值: {cap['mean']:.4f}</span>
             <span class="stat">最小值: {cap['min']:.4f}</span>
             <span class="stat">最大值: {cap['max']:.4f}</span>
-            <span class="stat">标准差: {cap['std']:.4f}</span>
+            <span class="stat">标准差: {cap['overall_std']:.4f}</span>
             <span class="stat" style="{cpk_style}">Cpk: {cpk_display}</span>
             <span class="stat" style="{ppk_style}">Ppk: {ppk_display}</span>
             <span class="stat" style="{defect_style}">不良率: {defect_display}</span>
@@ -192,16 +224,30 @@ def generate_html_report(output_path, df, value_configs, label_rules, group_col=
 def _create_single_chart(df, value_col, specs, label_rules, group_col, viol_df):
     fig = go.Figure()
     groups = sorted(df[group_col].unique())
-    y_min = df[value_col].min()
-    y_max = df[value_col].max()
-    y_range = y_max - y_min if y_max != y_min else 1.0
+    data_min = df[value_col].min()
+    data_max = df[value_col].max()
 
-    # 固定底部预留空白：增加 y 轴范围，让方块紧贴 x 轴标签上方
-    y_lower = y_min - 0.15 * y_range   # 轴下限
-    y_upper = y_max + 0.05 * y_range   # 轴上限
-    block_y = y_min - 0.07 * y_range   # 方块 y 坐标，靠近轴下限但高于轴标签
+    # 收集所有规格和参考线的值
+    lines = []
+    for key in ['usl', 'lsl', 'ref_upper', 'ref_lower']:
+        val = specs.get(key)
+        if val is not None:
+            lines.append(val)
 
-    # ----- 1. 底层标签方块（先添加）-----
+    # 确定全局最小/最大值
+    all_values = [data_min, data_max] + lines
+    y_min_overall = min(all_values)
+    y_max_overall = max(all_values)
+    y_range = y_max_overall - y_min_overall if y_max_overall != y_min_overall else 1.0
+
+    # 轴范围：底部预留15%，顶部预留5%
+    y_lower = y_min_overall - 0.15 * y_range
+    y_upper = y_max_overall + 0.05 * y_range
+
+    # 标签方块位置：固定在轴下限上方，紧贴 x 轴标签
+    block_y = y_min_overall - 0.07 * y_range
+
+    # ----- 1. 底层标签方块 -----
     if label_rules:
         color_groups = {}
         for rule in label_rules:
@@ -265,7 +311,6 @@ def _create_single_chart(df, value_col, specs, label_rules, group_col, viol_df):
     add_spec_line(specs.get('ref_upper'), f"UCL:{specs['ref_upper']}", "orange")
     add_spec_line(specs.get('ref_lower'), f"LCL:{specs['ref_lower']}", "orange")
 
-    # 设置 y 轴范围，固定底部空白
     fig.update_yaxes(range=[y_lower, y_upper])
     fig.update_xaxes(tickangle=45)
     fig.update_layout(height=400,
