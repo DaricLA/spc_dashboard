@@ -1,5 +1,5 @@
 """
-SPC 报告生成器 - SCT 分析，界面优化，莫兰迪配色，按钮布局调整
+SPC 报告生成器 - SCT 分析，界面优化，莫兰迪配色，统一微软雅黑字体
 """
 import tkinter as tk
 from tkinter import filedialog, ttk, messagebox, simpledialog, colorchooser
@@ -31,6 +31,12 @@ GREEN_FG = "#284238"
 BLUE_BG = "#b6c6d2"
 BLUE_FG = "#263444"
 
+# 统一字体
+FONT_FAMILY = "Microsoft YaHei"
+FONT_SIZE = 9
+FONT_BOLD = (FONT_FAMILY, FONT_SIZE, 'bold')
+FONT_NORMAL = (FONT_FAMILY, FONT_SIZE)
+
 class Application(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -38,6 +44,11 @@ class Application(tk.Tk):
         self.geometry("750x600")
         self.minsize(700, 500)
         self.resizable(True, True)
+
+        # 全局默认字体设置
+        self.option_add("*Font", FONT_NORMAL)
+        self.option_add("*Label.Font", FONT_NORMAL)
+        self.option_add("*Button.Font", FONT_BOLD)
 
         self.file_paths = []
         self.header_rows = []
@@ -81,9 +92,9 @@ class Application(tk.Tk):
         top1 = tk.Frame(self)
         top1.pack(fill=tk.X, padx=10, pady=(5,0))
         tk.Button(top1, text="① 选择多个SCT文件", command=self.select_files,
-                  bg=GREEN_BG, fg=GREEN_FG, font=('Arial', 9, 'bold')).pack(side=tk.LEFT)
+                  bg=GREEN_BG, fg=GREEN_FG, font=FONT_BOLD).pack(side=tk.LEFT)
         self.btn_merge = tk.Button(top1, text="仅合并SCT文件", command=self.merge_only, state="disabled",
-                                   bg=BLUE_BG, fg=BLUE_FG, font=('Arial', 9, 'bold'))
+                                   bg=BLUE_BG, fg=BLUE_FG, font=FONT_BOLD)
         self.btn_merge.pack(side=tk.LEFT, padx=5)
         self.lbl_count = tk.Label(top1, text="未选择文件")
         self.lbl_count.pack(side=tk.LEFT, padx=10)
@@ -112,15 +123,14 @@ class Application(tk.Tk):
         ctl_frm = tk.Frame(self)
         ctl_frm.pack(fill=tk.X, padx=10, pady=5)
         tk.Label(ctl_frm, text="制程站位:").pack(side=tk.LEFT)
-        self.config_combo = ttk.Combobox(ctl_frm, state="readonly", width=25)
+        self.config_combo = ttk.Combobox(ctl_frm, state="readonly", width=25, font=FONT_NORMAL)
         self.config_combo.pack(side=tk.LEFT, padx=5)
         self.refresh_config_list()
-        # 加载、生成、拉伸空白、保存、删除
         tk.Button(ctl_frm, text="② 加载站位配置", command=self.load_config,
-                  bg=GREEN_BG, fg=GREEN_FG, font=('Arial', 9, 'bold')).pack(side=tk.LEFT, padx=5)
+                  bg=GREEN_BG, fg=GREEN_FG, font=FONT_BOLD).pack(side=tk.LEFT, padx=5)
         self.btn_gen = tk.Button(ctl_frm, text="③ 生成SCT分析报告", command=self.start_analysis,
                                  bg=GREEN_BG, fg=GREEN_FG, height=1, state="disabled",
-                                 font=('Arial', 9, 'bold'))
+                                 font=FONT_BOLD)
         self.btn_gen.pack(side=tk.LEFT, padx=5)
         # 拉伸空白
         tk.Frame(ctl_frm).pack(side=tk.LEFT, expand=True, fill=tk.X)
@@ -162,10 +172,10 @@ class Application(tk.Tk):
         f = tk.LabelFrame(parent, text="字段映射（必填）")
         f.pack(fill=tk.X, padx=5, pady=5)
         tk.Label(f, text="样本ID列:").grid(row=0, column=0, sticky="e")
-        self.combo_sid = ttk.Combobox(f, state="readonly", width=25)
+        self.combo_sid = ttk.Combobox(f, state="readonly", width=25, font=FONT_NORMAL)
         self.combo_sid.grid(row=0, column=1, sticky="w")
         tk.Label(f, text="分组列:").grid(row=0, column=2, sticky="e")
-        self.combo_grp = ttk.Combobox(f, state="readonly", width=25)
+        self.combo_grp = ttk.Combobox(f, state="readonly", width=25, font=FONT_NORMAL)
         self.combo_grp.grid(row=0, column=3, sticky="w")
 
         pf = tk.LabelFrame(parent, text="预处理")
@@ -177,7 +187,7 @@ class Application(tk.Tk):
         tk.Checkbutton(pf, text="删除全空行", variable=self.var_del_empty).grid(row=0, column=0, sticky="w")
         tk.Checkbutton(pf, text="删除重复样本ID", variable=self.var_del_dup).grid(row=0, column=1, sticky="w")
         tk.Label(pf, text="缺失值填充:").grid(row=0, column=2, sticky="e")
-        ttk.Combobox(pf, textvariable=self.var_fillna, values=["不处理","均值","中位数","删除该行"], width=8).grid(row=0, column=3, sticky="w")
+        ttk.Combobox(pf, textvariable=self.var_fillna, values=["不处理","均值","中位数","删除该行"], width=8, font=FONT_NORMAL).grid(row=0, column=3, sticky="w")
         tk.Label(pf, text="异常值过滤(±σ):").grid(row=0, column=4, sticky="e")
         tk.Entry(pf, textvariable=self.var_outlier, width=5).grid(row=0, column=5, sticky="w")
 
@@ -198,7 +208,7 @@ class Application(tk.Tk):
         row_frame = tk.Frame(self.value_frame, relief=tk.RIDGE, borderwidth=1)
         row_frame.pack(fill=tk.X, pady=2)
         tk.Label(row_frame, text="数值列:").grid(row=0, column=0, sticky="e")
-        combo_val = ttk.Combobox(row_frame, state="readonly", width=20)
+        combo_val = ttk.Combobox(row_frame, state="readonly", width=20, font=FONT_NORMAL)
         combo_val.grid(row=0, column=1, sticky="w")
         if hasattr(self, 'all_columns'):
             combo_val['values'] = self.all_columns
@@ -209,7 +219,7 @@ class Application(tk.Tk):
         usl_choice = tk.StringVar(value="手动")
         tk.Radiobutton(row_frame, text="列", variable=usl_choice, value="列").grid(row=0, column=3)
         tk.Radiobutton(row_frame, text="手动", variable=usl_choice, value="手动").grid(row=0, column=4)
-        combo_usl = ttk.Combobox(row_frame, state="readonly", width=10)
+        combo_usl = ttk.Combobox(row_frame, state="readonly", width=10, font=FONT_NORMAL)
         combo_usl.grid(row=0, column=5)
         entry_usl = tk.Entry(row_frame, width=7)
         entry_usl.grid(row=0, column=6)
@@ -219,7 +229,7 @@ class Application(tk.Tk):
         lsl_choice = tk.StringVar(value="手动")
         tk.Radiobutton(row_frame, text="列", variable=lsl_choice, value="列").grid(row=1, column=3)
         tk.Radiobutton(row_frame, text="手动", variable=lsl_choice, value="手动").grid(row=1, column=4)
-        combo_lsl = ttk.Combobox(row_frame, state="readonly", width=10)
+        combo_lsl = ttk.Combobox(row_frame, state="readonly", width=10, font=FONT_NORMAL)
         combo_lsl.grid(row=1, column=5)
         entry_lsl = tk.Entry(row_frame, width=7)
         entry_lsl.grid(row=1, column=6)
@@ -277,7 +287,7 @@ class Application(tk.Tk):
         ctrl = tk.Frame(f)
         ctrl.pack(fill=tk.X)
         tk.Label(ctrl, text="操作符:").pack(side=tk.LEFT)
-        self.rule_op = ttk.Combobox(ctrl, values=["等于", "包含"], width=6)
+        self.rule_op = ttk.Combobox(ctrl, values=["等于", "包含"], width=6, font=FONT_NORMAL)
         self.rule_op.current(0)
         self.rule_op.pack(side=tk.LEFT, padx=5)
         tk.Label(ctrl, text="匹配值:").pack(side=tk.LEFT)
@@ -295,14 +305,14 @@ class Application(tk.Tk):
 
         list_f = tk.Frame(f)
         list_f.pack(fill=tk.BOTH, expand=True)
-        self.label_listbox = tk.Listbox(list_f, height=5)
+        self.label_listbox = tk.Listbox(list_f, height=5, font=FONT_NORMAL)
         self.label_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         sc = tk.Scrollbar(list_f, orient="vertical", command=self.label_listbox.yview)
         sc.pack(side=tk.RIGHT, fill=tk.Y)
         self.label_listbox.config(yscrollcommand=sc.set)
         tk.Button(f, text="删除选中规则", command=self.delete_label_rule).pack(pady=5)
 
-    # 配置管理方法保持不变（使用之前最新的实现）
+    # 配置管理
     def refresh_config_list(self):
         names = list(self.all_configs.keys())
         self.config_combo['values'] = names
@@ -408,7 +418,6 @@ class Application(tk.Tk):
             self.refresh_config_list()
             messagebox.showinfo("完成", f"配置已删除")
 
-    # 文件选择、刷新等保持不变
     def select_files(self):
         files = filedialog.askopenfilenames(filetypes=[("支持格式", "*.csv *.xlsx *.xls")])
         if not files:
@@ -458,7 +467,6 @@ class Application(tk.Tk):
     def update_header_row(self, idx, val):
         self.header_rows[idx] = val
 
-    # 分析相关（进度条、生成报告、弹窗确认打开）
     def start_analysis(self):
         if not self.file_paths:
             messagebox.showwarning("警告", "请先选择文件")
@@ -476,7 +484,7 @@ class Application(tk.Tk):
         self.progress_var = tk.DoubleVar()
         self.progress_bar = ttk.Progressbar(self.progress_win, variable=self.progress_var, maximum=100, length=250)
         self.progress_bar.pack(pady=20)
-        self.progress_label = tk.Label(self.progress_win, text="准备中...")
+        self.progress_label = tk.Label(self.progress_win, text="准备中...", font=FONT_NORMAL)
         self.progress_label.pack()
         self.progress_win.grab_set()
 
@@ -586,7 +594,6 @@ class Application(tk.Tk):
         finally:
             self.after(100, self.process_queue)
 
-    # 合并文件
     def merge_only(self):
         out_dir = self.output_dir.get().strip()
         if not out_dir:
@@ -616,7 +623,6 @@ class Application(tk.Tk):
         except Exception as e:
             self.after(0, lambda: messagebox.showerror("错误", str(e)))
 
-    # 标签规则辅助
     def pick_color(self, entry):
         color = colorchooser.askcolor()[1]
         if color:
