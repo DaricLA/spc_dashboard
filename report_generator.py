@@ -1,6 +1,5 @@
 """
-生成 SCT 离线 HTML 报告：模块化布局，规格线标注外置，标签方块紧贴 x 轴，y 轴自适应，卡片高亮
-支持 Cpk/Ppk 独立计算，分组数 >30 跳过小提琴
+生成 SCT 离线 HTML 报告：内部计算子组统计，避免列名不匹配
 """
 import plotly.graph_objects as go
 import plotly.io as pio
@@ -9,7 +8,8 @@ import pandas as pd
 import numpy as np
 from constants import get_constants
 
-def _compute_capability(df, value_col, specs, subgroup_stats, chart_type='X-R'):
+def _compute_capability(df, value_col, specs):
+    """按数值列计算能力，内部处理子组统计"""
     series = df[value_col].dropna()
     mean = series.mean()
     overall_std = series.std(ddof=1)
@@ -18,19 +18,26 @@ def _compute_capability(df, value_col, specs, subgroup_stats, chart_type='X-R'):
     usl = specs.get('usl')
     lsl = specs.get('lsl')
 
-    if chart_type == 'X-R':
+    # 计算该列的子组统计
+    subgroup_stats = df.groupby('group')[value_col].agg(['mean', 'std', 'count', 'min', 'max'])
+    subgroup_stats['range'] = subgroup_stats['max'] - subgroup_stats['min']
+    subgroup_stats = subgroup_stats.rename(columns={'mean': 'subgroup_mean', 'std': 'subgroup_std',
+                                                    'count': 'subgroup_size', 'min': 'subgroup_min',
+                                                    'max': 'subgroup_max', 'range': 'subgroup_range'})
+
+    n_avg = int(round(subgroup_stats['subgroup_size'].mean()))
+    if n_avg < 2:
+        n_avg = 2
+
+    if len(subgroup_stats['subgroup_size'].unique()) == 1:  # 等子组，可用X-R
         R_bar = (subgroup_stats['subgroup_range'] * subgroup_stats['subgroup_size']).sum() / subgroup_stats['subgroup_size'].sum()
-        n_avg = int(round(subgroup_stats['subgroup_size'].mean()))
         const = get_constants(n_avg)
         sigma_within = R_bar / const['d2']
-    else:
+    else:  # 不等子组，用X-S
         ni = subgroup_stats['subgroup_size']
         si = subgroup_stats['subgroup_std']
         pooled_var = ((ni - 1) * si**2).sum() / (ni - 1).sum()
         S_bar = np.sqrt(pooled_var)
-        n_avg = int(round(subgroup_stats['subgroup_size'].mean()))
-        if n_avg < 2:
-            n_avg = 2
         const = get_constants(n_avg)
         sigma_within = S_bar / const['c4']
 
@@ -99,7 +106,7 @@ def _detect_spec_violations(df, value_col, specs):
     return result
 
 def generate_html_report(output_path, df, value_configs, label_rules, group_col='group',
-                         subgroup_stats=None, chart_type='X-R', progress_callback=None):
+                         progress_callback=None):
     all_violations = []
     sections = []
     total = len(value_configs)
@@ -111,7 +118,7 @@ def generate_html_report(output_path, df, value_configs, label_rules, group_col=
 
         col = vc['value_col']
         specs = vc['specs']
-        cap = _compute_capability(df, col, specs, subgroup_stats, chart_type)
+        cap = _compute_capability(df, col, specs)
         viol_df = _detect_spec_violations(df, col, specs)
         all_violations.append(viol_df)
 
