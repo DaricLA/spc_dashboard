@@ -1,5 +1,5 @@
 """
-SPC 报告生成器 - SCT 分析，进度条，修复多列子组统计
+SPC 报告生成器 - SCT 分析，莫兰迪配色，界面优化，弹窗确认打开报告
 """
 import tkinter as tk
 from tkinter import filedialog, ttk, messagebox, simpledialog, colorchooser
@@ -8,6 +8,7 @@ import os
 import sys
 import json
 import queue
+import webbrowser
 import pandas as pd
 import numpy as np
 from datetime import datetime
@@ -28,8 +29,8 @@ class Application(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("SCT 分析报告生成器")
-        self.geometry("1100x850")
-        self.minsize(900, 700)
+        self.geometry("750x600")
+        self.minsize(700, 500)
         self.resizable(True, True)
 
         self.file_paths = []
@@ -71,33 +72,42 @@ class Application(tk.Tk):
             messagebox.showerror("保存失败", f"无法写入配置文件：{e}\n请确保程序所在目录可写或移动程序到其他位置。")
 
     def create_widgets(self):
+        # 莫兰迪配色定义
+        BTN_BG_GREEN = "#8a9a83"
+        BTN_FG_GREEN = "#3e4e3e"
+        BTN_BG_BLUE = "#7a8b99"
+        BTN_FG_BLUE = "#2d3a45"
+
         top = tk.Frame(self)
         top.pack(fill=tk.X, padx=10, pady=5)
         tk.Button(top, text="选择多个SCT文件", command=self.select_files,
-                  bg="#2ecc71", fg="white", font=('Arial', 9, 'bold')).pack(side=tk.LEFT)
+                  bg=BTN_BG_GREEN, fg=BTN_FG_GREEN, font=('Arial', 9, 'bold')).pack(side=tk.LEFT)
         self.lbl_count = tk.Label(top, text="未选择文件")
         self.lbl_count.pack(side=tk.LEFT, padx=10)
         self.btn_merge = tk.Button(top, text="仅合并文件", command=self.merge_only, state="disabled",
-                                   bg="#3498db", fg="white", font=('Arial', 9, 'bold'))
+                                   bg=BTN_BG_BLUE, fg=BTN_FG_BLUE, font=('Arial', 9, 'bold'))
         self.btn_merge.pack(side=tk.RIGHT, padx=5)
 
         out_f = tk.Frame(self)
         out_f.pack(fill=tk.X, padx=10, pady=5)
         tk.Label(out_f, text="输出目录:").pack(side=tk.LEFT)
-        tk.Entry(out_f, textvariable=self.output_dir, width=60).pack(side=tk.LEFT, padx=5)
+        tk.Entry(out_f, textvariable=self.output_dir, width=50).pack(side=tk.LEFT, padx=5)
         tk.Button(out_f, text="浏览", command=self.browse_output_dir).pack(side=tk.LEFT)
 
-        list_cont = tk.Frame(self)
-        list_cont.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        # 文件列表滚动区（高度限制）
+        list_cont = tk.Frame(self, height=150)
+        list_cont.pack(fill=tk.X, padx=10, pady=5)
+        list_cont.pack_propagate(False)  # 保持高度不变
         self.canvas = tk.Canvas(list_cont)
         self.scrollbar = tk.Scrollbar(list_cont, orient="vertical", command=self.canvas.yview)
         self.scrollable_frame = tk.Frame(self.canvas)
         self.scrollable_frame.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
         self.canvas.create_window((0,0), window=self.scrollable_frame, anchor="nw")
-        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        self.canvas.configure(yscrollcommand=self.scrollbar.set, height=150)
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
+        # 笔记本区域（填充剩余空间，内部可滚动）
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
@@ -113,21 +123,22 @@ class Application(tk.Tk):
         self.notebook.add(page3, text="标签规则")
         self.create_label_section(page3)
 
+        # 生成按钮（莫兰迪配色）
         self.btn_gen = tk.Button(self, text="生成 SCT 分析报告", command=self.start_analysis,
-                                 bg="#2ecc71", fg="white", height=2, state="disabled",
+                                 bg=BTN_BG_GREEN, fg=BTN_FG_GREEN, height=2, state="disabled",
                                  font=('Arial', 11, 'bold'))
         self.btn_gen.pack(pady=10)
-        self.status = tk.Label(self, text="", fg="blue")
+        self.status = tk.Label(self, text="", fg="gray")
         self.status.pack()
 
     def create_basic_section(self, parent):
         f = tk.LabelFrame(parent, text="字段映射（必填）")
         f.pack(fill=tk.X, padx=5, pady=5)
         tk.Label(f, text="样本ID列:").grid(row=0, column=0, sticky="e")
-        self.combo_sid = ttk.Combobox(f, state="readonly", width=30)
+        self.combo_sid = ttk.Combobox(f, state="readonly", width=25)
         self.combo_sid.grid(row=0, column=1, sticky="w")
         tk.Label(f, text="分组列:").grid(row=0, column=2, sticky="e")
-        self.combo_grp = ttk.Combobox(f, state="readonly", width=30)
+        self.combo_grp = ttk.Combobox(f, state="readonly", width=25)
         self.combo_grp.grid(row=0, column=3, sticky="w")
 
         pf = tk.LabelFrame(parent, text="预处理")
@@ -160,7 +171,7 @@ class Application(tk.Tk):
         row_frame = tk.Frame(self.value_frame, relief=tk.RIDGE, borderwidth=1)
         row_frame.pack(fill=tk.X, pady=2)
         tk.Label(row_frame, text="数值列:").grid(row=0, column=0, sticky="e")
-        combo_val = ttk.Combobox(row_frame, state="readonly", width=30)
+        combo_val = ttk.Combobox(row_frame, state="readonly", width=20)
         combo_val.grid(row=0, column=1, sticky="w")
         if hasattr(self, 'all_columns'):
             combo_val['values'] = self.all_columns
@@ -171,9 +182,9 @@ class Application(tk.Tk):
         usl_choice = tk.StringVar(value="手动")
         tk.Radiobutton(row_frame, text="列", variable=usl_choice, value="列").grid(row=0, column=3)
         tk.Radiobutton(row_frame, text="手动", variable=usl_choice, value="手动").grid(row=0, column=4)
-        combo_usl = ttk.Combobox(row_frame, state="readonly", width=12)
+        combo_usl = ttk.Combobox(row_frame, state="readonly", width=10)
         combo_usl.grid(row=0, column=5)
-        entry_usl = tk.Entry(row_frame, width=8)
+        entry_usl = tk.Entry(row_frame, width=7)
         entry_usl.grid(row=0, column=6)
         usl_choice.trace_add('write', lambda *a, r=row_frame: self.toggle_spec_row(r))
 
@@ -181,17 +192,17 @@ class Application(tk.Tk):
         lsl_choice = tk.StringVar(value="手动")
         tk.Radiobutton(row_frame, text="列", variable=lsl_choice, value="列").grid(row=1, column=3)
         tk.Radiobutton(row_frame, text="手动", variable=lsl_choice, value="手动").grid(row=1, column=4)
-        combo_lsl = ttk.Combobox(row_frame, state="readonly", width=12)
+        combo_lsl = ttk.Combobox(row_frame, state="readonly", width=10)
         combo_lsl.grid(row=1, column=5)
-        entry_lsl = tk.Entry(row_frame, width=8)
+        entry_lsl = tk.Entry(row_frame, width=7)
         entry_lsl.grid(row=1, column=6)
         lsl_choice.trace_add('write', lambda *a, r=row_frame: self.toggle_spec_row(r))
 
         tk.Label(row_frame, text="参考上限:").grid(row=2, column=0, sticky="e")
-        entry_refu = tk.Entry(row_frame, width=8)
+        entry_refu = tk.Entry(row_frame, width=7)
         entry_refu.grid(row=2, column=1)
         tk.Label(row_frame, text="参考下限:").grid(row=2, column=2, sticky="e")
-        entry_refl = tk.Entry(row_frame, width=8)
+        entry_refl = tk.Entry(row_frame, width=7)
         entry_refl.grid(row=2, column=3)
 
         row_data = {
@@ -272,7 +283,7 @@ class Application(tk.Tk):
         self.config_combo.pack(side=tk.LEFT, padx=5)
         self.refresh_config_list()
         tk.Button(frm, text="加载", command=self.load_config,
-                  bg="#2ecc71", fg="white", font=('Arial', 9, 'bold')).pack(side=tk.LEFT, padx=5)
+                  bg="#8a9a83", fg="#3e4e3e", font=('Arial', 9, 'bold')).pack(side=tk.LEFT, padx=5)
         tk.Button(frm, text="保存", command=self.save_config).pack(side=tk.LEFT, padx=5)
         tk.Button(frm, text="删除", command=self.delete_config).pack(side=tk.LEFT, padx=5)
 
@@ -491,8 +502,6 @@ class Application(tk.Tk):
             if not value_configs:
                 raise ValueError("至少需要一个有效的数值列")
 
-            # 不再预先计算全局子组统计，改为在 report_generator 内部按列计算
-
             out_path = os.path.join(out_dir, f"SCT_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html")
             generate_html_report(out_path, df, value_configs, self.label_rules,
                                  group_col='group',
@@ -536,7 +545,8 @@ class Application(tk.Tk):
     def analysis_done(self, path):
         self.status.config(text=f"报告已生成：{path}")
         self.btn_gen.config(state="normal")
-        messagebox.showinfo("完成", f"报告已保存：{path}")
+        if messagebox.askyesno("报告已生成", f"报告已保存至：\n{path}\n是否立即打开？"):
+            webbrowser.open(f"file:///{path}")
 
     def analysis_error(self, msg):
         self.status.config(text="分析失败")
