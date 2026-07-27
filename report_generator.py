@@ -1,5 +1,6 @@
 """
-生成 SCT 离线 HTML 报告：内部计算子组统计，避免列名不匹配
+生成 SCT 离线 HTML 报告：模块化布局，规格线标注外置，标签方块紧贴 x 轴，y 轴自适应，卡片高亮
+内部按列计算子组统计，分组数 >30 跳过小提琴
 """
 import plotly.graph_objects as go
 import plotly.io as pio
@@ -9,7 +10,6 @@ import numpy as np
 from constants import get_constants
 
 def _compute_capability(df, value_col, specs):
-    """按数值列计算能力，内部处理子组统计"""
     series = df[value_col].dropna()
     mean = series.mean()
     overall_std = series.std(ddof=1)
@@ -18,7 +18,6 @@ def _compute_capability(df, value_col, specs):
     usl = specs.get('usl')
     lsl = specs.get('lsl')
 
-    # 计算该列的子组统计
     subgroup_stats = df.groupby('group')[value_col].agg(['mean', 'std', 'count', 'min', 'max'])
     subgroup_stats['range'] = subgroup_stats['max'] - subgroup_stats['min']
     subgroup_stats = subgroup_stats.rename(columns={'mean': 'subgroup_mean', 'std': 'subgroup_std',
@@ -29,11 +28,11 @@ def _compute_capability(df, value_col, specs):
     if n_avg < 2:
         n_avg = 2
 
-    if len(subgroup_stats['subgroup_size'].unique()) == 1:  # 等子组，可用X-R
+    if len(subgroup_stats['subgroup_size'].unique()) == 1:
         R_bar = (subgroup_stats['subgroup_range'] * subgroup_stats['subgroup_size']).sum() / subgroup_stats['subgroup_size'].sum()
         const = get_constants(n_avg)
         sigma_within = R_bar / const['d2']
-    else:  # 不等子组，用X-S
+    else:
         ni = subgroup_stats['subgroup_size']
         si = subgroup_stats['subgroup_std']
         pooled_var = ((ni - 1) * si**2).sum() / (ni - 1).sum()
