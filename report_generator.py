@@ -1,6 +1,6 @@
 """
 生成 SCT 离线 HTML 报告：模块化布局，规格线标注外置，标签方块紧贴 x 轴，y 轴自适应，卡片高亮
-支持 Cpk（组内）和 Ppk（整体）独立计算
+支持 Cpk/Ppk 独立计算，分组数 >30 跳过小提琴
 """
 import plotly.graph_objects as go
 import plotly.io as pio
@@ -10,23 +10,20 @@ import numpy as np
 from constants import get_constants
 
 def _compute_capability(df, value_col, specs, subgroup_stats, chart_type='X-R'):
-    """计算短期能力 Cpk (组内) 和长期绩效 Ppk (整体)"""
     series = df[value_col].dropna()
     mean = series.mean()
-    overall_std = series.std(ddof=1)   # 整体标准差
+    overall_std = series.std(ddof=1)
     min_val = series.min()
     max_val = series.max()
     usl = specs.get('usl')
     lsl = specs.get('lsl')
 
-    # 组内标准差估计
     if chart_type == 'X-R':
-        # R̄ / d2
         R_bar = (subgroup_stats['subgroup_range'] * subgroup_stats['subgroup_size']).sum() / subgroup_stats['subgroup_size'].sum()
         n_avg = int(round(subgroup_stats['subgroup_size'].mean()))
         const = get_constants(n_avg)
         sigma_within = R_bar / const['d2']
-    else:  # X-S
+    else:
         ni = subgroup_stats['subgroup_size']
         si = subgroup_stats['subgroup_std']
         pooled_var = ((ni - 1) * si**2).sum() / (ni - 1).sum()
@@ -102,11 +99,16 @@ def _detect_spec_violations(df, value_col, specs):
     return result
 
 def generate_html_report(output_path, df, value_configs, label_rules, group_col='group',
-                         subgroup_stats=None, chart_type='X-R'):
+                         subgroup_stats=None, chart_type='X-R', progress_callback=None):
     all_violations = []
     sections = []
+    total = len(value_configs)
 
     for idx, vc in enumerate(value_configs):
+        if progress_callback:
+            percent = 15 + int((idx / total) * 80)
+            progress_callback(percent, f"生成图表 {idx+1}/{total}")
+
         col = vc['value_col']
         specs = vc['specs']
         cap = _compute_capability(df, col, specs, subgroup_stats, chart_type)
@@ -166,6 +168,9 @@ def generate_html_report(output_path, df, value_configs, label_rules, group_col=
         </section>"""
         sections.append(section)
 
+    if progress_callback:
+        progress_callback(97, "生成超规明细...")
+
     if all_violations:
         all_viol = pd.concat(all_violations, ignore_index=True)
     else:
@@ -188,6 +193,9 @@ def generate_html_report(output_path, df, value_configs, label_rules, group_col=
         viol_table_html += '</tbody></table>'
     else:
         viol_table_html = "<p>未检测到超出规格的样本。</p>"
+
+    if progress_callback:
+        progress_callback(100, "保存报告中...")
 
     full_html = f"""<!DOCTYPE html>
 <html lang="zh">
@@ -224,97 +232,77 @@ def generate_html_report(output_path, df, value_configs, label_rules, group_col=
 def _create_single_chart(df, value_col, specs, label_rules, group_col, viol_df):
     fig = go.Figure()
     groups = sorted(df[group_col].unique())
+    n_groups = len(groups)
+    show_violin = n_groups <= 30
+
     data_min = df[value_col].min()
     data_max = df[value_col].max()
-
-    # 收集所有规格和参考线的值
     lines = []
     for key in ['usl', 'lsl', 'ref_upper', 'ref_lower']:
-        val = specs.get(key)
-        if val is not None:
-            lines.append(val)
-
-    # 确定全局最小/最大值
-    all_values = [data_min, data_max] + lines
-    y_min_overall = min(all_values)
-    y_max_overall = max(all_values)
+        v = specs.get(key)
+        if v is not None:
+            lines.append(v)
+    all_vals = [data_min, data_max] + lines
+    y_min_overall = min(all_vals)
+    y_max_overall = max(all_vals)
     y_range = y_max_overall - y_min_overall if y_max_overall != y_min_overall else 1.0
-
-    # 轴范围：底部预留15%，顶部预留5%
     y_lower = y_min_overall - 0.15 * y_range
     y_upper = y_max_overall + 0.05 * y_range
-
-    # 标签方块位置：固定在轴下限上方，紧贴 x 轴标签
     block_y = y_min_overall - 0.07 * y_range
 
-    # ----- 1. 底层标签方块 -----
     if label_rules:
         color_groups = {}
         for rule in label_rules:
             op = rule['operator']
             val = rule['value']
             color = rule['color']
-            matched_groups = []
+            matched = []
             for grp in groups:
                 grp_str = str(grp)
                 if (op == 'equals' and grp_str == val) or (op == 'contains' and val in grp_str):
-                    matched_groups.append(grp)
-            if matched_groups:
+                    matched.append(grp)
+            if matched:
                 if color not in color_groups:
                     color_groups[color] = []
-                color_groups[color].extend(matched_groups)
-
+                color_groups[color].extend(matched)
         for color, x_list in color_groups.items():
             unique_x = list(dict.fromkeys(x_list))
             fig.add_trace(go.Scatter(
-                x=unique_x,
-                y=[block_y] * len(unique_x),
+                x=unique_x, y=[block_y]*len(unique_x),
                 mode='markers',
                 marker=dict(symbol='square', size=10, color=color, line=dict(width=1, color=color)),
-                showlegend=False,
-                hoverinfo='none'
+                showlegend=False, hoverinfo='none'
             ))
 
-    # ----- 2. 小提琴背景 -----
-    fig.add_trace(go.Violin(x=df[group_col], y=df[value_col], name=value_col,
-                            line_color='lightblue', fillcolor='lightblue', opacity=0.3,
-                            points=False, box_visible=False, meanline_visible=False,
-                            showlegend=False))
+    if show_violin:
+        fig.add_trace(go.Violin(x=df[group_col], y=df[value_col], name=value_col,
+                                line_color='lightblue', fillcolor='lightblue', opacity=0.3,
+                                points=False, box_visible=False, meanline_visible=False,
+                                showlegend=False))
 
-    # ----- 3. 正常散点 -----
     normal = df[~df.index.isin(viol_df.index)] if not viol_df.empty else df
     fig.add_trace(go.Scatter(x=normal[group_col], y=normal[value_col], mode='markers',
                              marker=dict(color='#1f77b4', size=5), showlegend=False))
 
-    # ----- 4. 超规散点 -----
     if not viol_df.empty:
         fig.add_trace(go.Scatter(x=viol_df[group_col], y=viol_df['value'], mode='markers',
                                  marker=dict(symbol='x', color='red', size=10, line=dict(width=2)),
                                  text=viol_df['超规描述'], showlegend=False))
 
-    # ----- 5. 规格线和参考线（带右侧标注）-----
-    def add_spec_line(y_val, text, color):
+    def add_line(y_val, text, color):
         if y_val is not None:
             fig.add_hline(y=y_val, line_dash="dash", line_color=color)
-            fig.add_annotation(
-                xref='paper', yref='y',
-                x=1.02, y=y_val,
-                text=text,
-                showarrow=False,
-                xanchor='left',
-                yanchor='middle',
-                font=dict(color=color, size=10)
-            )
+            fig.add_annotation(xref='paper', yref='y', x=1.02, y=y_val, text=text,
+                               showarrow=False, xanchor='left', yanchor='middle',
+                               font=dict(color=color, size=10))
 
-    add_spec_line(specs.get('usl'), f"USL:{specs['usl']}", "red")
-    add_spec_line(specs.get('lsl'), f"LSL:{specs['lsl']}", "red")
-    add_spec_line(specs.get('ref_upper'), f"UCL:{specs['ref_upper']}", "orange")
-    add_spec_line(specs.get('ref_lower'), f"LCL:{specs['ref_lower']}", "orange")
+    add_line(specs.get('usl'), f"USL:{specs['usl']}", "red")
+    add_line(specs.get('lsl'), f"LSL:{specs['lsl']}", "red")
+    add_line(specs.get('ref_upper'), f"UCL:{specs['ref_upper']}", "orange")
+    add_line(specs.get('ref_lower'), f"LCL:{specs['ref_lower']}", "orange")
 
     fig.update_yaxes(range=[y_lower, y_upper])
     fig.update_xaxes(tickangle=45)
-    fig.update_layout(height=400,
-                      margin=dict(l=40, r=120, t=40, b=80),
-                      plot_bgcolor='white',
-                      showlegend=False)
+    fig.update_layout(height=400, margin=dict(l=40, r=120, t=40, b=80),
+                      plot_bgcolor='white', showlegend=False)
     return fig
