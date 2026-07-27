@@ -73,7 +73,6 @@ class Application(tk.Tk):
         # 顶部文件选择
         top = tk.Frame(self)
         top.pack(fill=tk.X, padx=10, pady=5)
-        # 修改按钮文字和样式
         tk.Button(top, text="选择多个SCT文件", command=self.select_files,
                   bg="#2ecc71", fg="white", font=('Arial', 9, 'bold')).pack(side=tk.LEFT)
         self.lbl_count = tk.Label(top, text="未选择文件")
@@ -286,7 +285,6 @@ class Application(tk.Tk):
         self.config_combo = ttk.Combobox(frm, state="readonly", width=30)
         self.config_combo.pack(side=tk.LEFT, padx=5)
         self.refresh_config_list()
-        # 加载按钮改为绿色
         tk.Button(frm, text="加载", command=self.load_config,
                   bg="#2ecc71", fg="white", font=('Arial', 9, 'bold')).pack(side=tk.LEFT, padx=5)
         tk.Button(frm, text="保存", command=self.save_config).pack(side=tk.LEFT, padx=5)
@@ -480,6 +478,7 @@ class Application(tk.Tk):
             if 'group' not in df.columns:
                 raise ValueError("数据中无分组列，请检查字段映射")
 
+            # 收集数值列配置
             value_configs = []
             for rd in self.value_rows:
                 val_col = rd['combo_val'].get()
@@ -491,10 +490,21 @@ class Application(tk.Tk):
             if not value_configs:
                 raise ValueError("至少需要一个有效的数值列")
 
+            # 计算子组统计（用于组内标准差估计）
+            subgroup_stats = core.subgroup_statistics(df, 'group', 'value')
+            sizes = subgroup_stats['subgroup_size']
+            equal_size = (sizes.nunique() == 1)
+            # 自动确定图类型用于能力计算（X-R 或 X-S）
+            if equal_size:
+                chart_type = 'X-R'
+            else:
+                chart_type = 'X-S'
+
             label_rules = self.label_rules
 
             out_path = os.path.join(out_dir, f"SCT_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html")
-            generate_html_report(out_path, df, value_configs, label_rules, group_col='group')
+            generate_html_report(out_path, df, value_configs, label_rules, group_col='group',
+                                 subgroup_stats=subgroup_stats, chart_type=chart_type)
             import webbrowser
             webbrowser.open(f"file:///{out_path}")
             self.after(0, lambda: self.analysis_done(out_path))
