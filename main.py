@@ -1,5 +1,5 @@
 """
-SPC 报告生成器 - SCT 分析，莫兰迪配色，界面优化，弹窗确认打开报告
+SPC 报告生成器 - SCT 分析，界面优化，莫兰迪配色，按钮布局调整
 """
 import tkinter as tk
 from tkinter import filedialog, ttk, messagebox, simpledialog, colorchooser
@@ -25,6 +25,12 @@ def get_config_path():
 
 CONFIG_FILE = get_config_path()
 
+# 莫兰迪配色
+GREEN_BG = "#a8c8be"
+GREEN_FG = "#284238"
+BLUE_BG = "#b6c6d2"
+BLUE_FG = "#263444"
+
 class Application(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -44,7 +50,6 @@ class Application(tk.Tk):
         self.after(100, self.process_queue)
 
         self.create_widgets()
-        self.create_config_management()
 
     def _load_all_configs(self):
         path = CONFIG_FILE
@@ -72,32 +77,28 @@ class Application(tk.Tk):
             messagebox.showerror("保存失败", f"无法写入配置文件：{e}\n请确保程序所在目录可写或移动程序到其他位置。")
 
     def create_widgets(self):
-        # 莫兰迪配色定义
-        BTN_BG_GREEN = "#8a9a83"
-        BTN_FG_GREEN = "#3e4e3e"
-        BTN_BG_BLUE = "#7a8b99"
-        BTN_FG_BLUE = "#2d3a45"
-
-        top = tk.Frame(self)
-        top.pack(fill=tk.X, padx=10, pady=5)
-        tk.Button(top, text="选择多个SCT文件", command=self.select_files,
-                  bg=BTN_BG_GREEN, fg=BTN_FG_GREEN, font=('Arial', 9, 'bold')).pack(side=tk.LEFT)
-        self.lbl_count = tk.Label(top, text="未选择文件")
+        # ===== 第一行：文件选择 + 仅合并按钮 =====
+        top1 = tk.Frame(self)
+        top1.pack(fill=tk.X, padx=10, pady=(5,0))
+        tk.Button(top1, text="① 选择多个SCT文件", command=self.select_files,
+                  bg=GREEN_BG, fg=GREEN_FG, font=('Arial', 9, 'bold')).pack(side=tk.LEFT)
+        self.btn_merge = tk.Button(top1, text="仅合并SCT文件", command=self.merge_only, state="disabled",
+                                   bg=BLUE_BG, fg=BLUE_FG, font=('Arial', 9, 'bold'))
+        self.btn_merge.pack(side=tk.LEFT, padx=5)
+        self.lbl_count = tk.Label(top1, text="未选择文件")
         self.lbl_count.pack(side=tk.LEFT, padx=10)
-        self.btn_merge = tk.Button(top, text="仅合并文件", command=self.merge_only, state="disabled",
-                                   bg=BTN_BG_BLUE, fg=BTN_FG_BLUE, font=('Arial', 9, 'bold'))
-        self.btn_merge.pack(side=tk.RIGHT, padx=5)
 
+        # ===== 第二行：输出目录 =====
         out_f = tk.Frame(self)
         out_f.pack(fill=tk.X, padx=10, pady=5)
         tk.Label(out_f, text="输出目录:").pack(side=tk.LEFT)
         tk.Entry(out_f, textvariable=self.output_dir, width=50).pack(side=tk.LEFT, padx=5)
         tk.Button(out_f, text="浏览", command=self.browse_output_dir).pack(side=tk.LEFT)
 
-        # 文件列表滚动区（高度限制）
+        # ===== 第三行：文件列表（固定高度，表头行在前） =====
         list_cont = tk.Frame(self, height=150)
         list_cont.pack(fill=tk.X, padx=10, pady=5)
-        list_cont.pack_propagate(False)  # 保持高度不变
+        list_cont.pack_propagate(False)
         self.canvas = tk.Canvas(list_cont)
         self.scrollbar = tk.Scrollbar(list_cont, orient="vertical", command=self.canvas.yview)
         self.scrollable_frame = tk.Frame(self.canvas)
@@ -107,9 +108,39 @@ class Application(tk.Tk):
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # 笔记本区域（填充剩余空间，内部可滚动）
-        self.notebook = ttk.Notebook(self)
-        self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        # ===== 第四行：制程站位 + 操作按钮 =====
+        ctl_frm = tk.Frame(self)
+        ctl_frm.pack(fill=tk.X, padx=10, pady=5)
+        tk.Label(ctl_frm, text="制程站位:").pack(side=tk.LEFT)
+        self.config_combo = ttk.Combobox(ctl_frm, state="readonly", width=25)
+        self.config_combo.pack(side=tk.LEFT, padx=5)
+        self.refresh_config_list()
+        # 加载、生成、拉伸空白、保存、删除
+        tk.Button(ctl_frm, text="② 加载站位配置", command=self.load_config,
+                  bg=GREEN_BG, fg=GREEN_FG, font=('Arial', 9, 'bold')).pack(side=tk.LEFT, padx=5)
+        self.btn_gen = tk.Button(ctl_frm, text="③ 生成SCT分析报告", command=self.start_analysis,
+                                 bg=GREEN_BG, fg=GREEN_FG, height=1, state="disabled",
+                                 font=('Arial', 9, 'bold'))
+        self.btn_gen.pack(side=tk.LEFT, padx=5)
+        # 拉伸空白
+        tk.Frame(ctl_frm).pack(side=tk.LEFT, expand=True, fill=tk.X)
+        tk.Button(ctl_frm, text="保存配置", command=self.save_config).pack(side=tk.LEFT, padx=5)
+        tk.Button(ctl_frm, text="删除配置", command=self.delete_config).pack(side=tk.LEFT, padx=5)
+
+        # ===== 第五行：笔记本区域（可滚动） =====
+        nb_container = tk.Frame(self)
+        nb_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0,5))
+        self.nb_canvas = tk.Canvas(nb_container, height=250, highlightthickness=0)
+        self.nb_scrollbar = tk.Scrollbar(nb_container, orient="vertical", command=self.nb_canvas.yview)
+        self.nb_frame = tk.Frame(self.nb_canvas)
+        self.nb_frame.bind("<Configure>", lambda e: self.nb_canvas.configure(scrollregion=self.nb_canvas.bbox("all")))
+        self.nb_canvas.create_window((0,0), window=self.nb_frame, anchor="nw")
+        self.nb_canvas.configure(yscrollcommand=self.nb_scrollbar.set)
+        self.nb_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.nb_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.notebook = ttk.Notebook(self.nb_frame)
+        self.notebook.pack(fill=tk.BOTH, expand=True)
 
         page1 = tk.Frame(self.notebook)
         self.notebook.add(page1, text="基本设置")
@@ -120,16 +151,12 @@ class Application(tk.Tk):
         self.create_value_col_section(page2)
 
         page3 = tk.Frame(self.notebook)
-        self.notebook.add(page3, text="标签规则")
+        self.notebook.add(page3, text="Remark标签颜色规则")
         self.create_label_section(page3)
 
-        # 生成按钮（莫兰迪配色）
-        self.btn_gen = tk.Button(self, text="生成 SCT 分析报告", command=self.start_analysis,
-                                 bg=BTN_BG_GREEN, fg=BTN_FG_GREEN, height=2, state="disabled",
-                                 font=('Arial', 11, 'bold'))
-        self.btn_gen.pack(pady=10)
+        # 状态栏
         self.status = tk.Label(self, text="", fg="gray")
-        self.status.pack()
+        self.status.pack(pady=(0,5))
 
     def create_basic_section(self, parent):
         f = tk.LabelFrame(parent, text="字段映射（必填）")
@@ -275,18 +302,7 @@ class Application(tk.Tk):
         self.label_listbox.config(yscrollcommand=sc.set)
         tk.Button(f, text="删除选中规则", command=self.delete_label_rule).pack(pady=5)
 
-    def create_config_management(self):
-        frm = tk.Frame(self)
-        frm.pack(fill=tk.X, padx=10, pady=5, before=self.notebook)
-        tk.Label(frm, text="制程站位:").pack(side=tk.LEFT)
-        self.config_combo = ttk.Combobox(frm, state="readonly", width=30)
-        self.config_combo.pack(side=tk.LEFT, padx=5)
-        self.refresh_config_list()
-        tk.Button(frm, text="加载", command=self.load_config,
-                  bg="#8a9a83", fg="#3e4e3e", font=('Arial', 9, 'bold')).pack(side=tk.LEFT, padx=5)
-        tk.Button(frm, text="保存", command=self.save_config).pack(side=tk.LEFT, padx=5)
-        tk.Button(frm, text="删除", command=self.delete_config).pack(side=tk.LEFT, padx=5)
-
+    # 配置管理方法保持不变（使用之前最新的实现）
     def refresh_config_list(self):
         names = list(self.all_configs.keys())
         self.config_combo['values'] = names
@@ -392,6 +408,7 @@ class Application(tk.Tk):
             self.refresh_config_list()
             messagebox.showinfo("完成", f"配置已删除")
 
+    # 文件选择、刷新等保持不变
     def select_files(self):
         files = filedialog.askopenfilenames(filetypes=[("支持格式", "*.csv *.xlsx *.xls")])
         if not files:
@@ -431,16 +448,17 @@ class Application(tk.Tk):
         for i, (f, h) in enumerate(zip(self.file_paths, self.header_rows)):
             frm = tk.Frame(self.scrollable_frame)
             frm.pack(fill=tk.X, pady=2)
-            tk.Label(frm, text=os.path.basename(f), width=50, anchor="w").pack(side=tk.LEFT)
             tk.Label(frm, text="表头行:").pack(side=tk.LEFT)
             var = tk.IntVar(value=h)
             sp = tk.Spinbox(frm, from_=0, to=5, textvariable=var, width=3)
             sp.pack(side=tk.LEFT)
             sp.bind("<ButtonRelease-1>", lambda e, idx=i: self.update_header_row(idx, var.get()))
+            tk.Label(frm, text=os.path.basename(f), anchor="w").pack(side=tk.LEFT, padx=5)
 
     def update_header_row(self, idx, val):
         self.header_rows[idx] = val
 
+    # 分析相关（进度条、生成报告、弹窗确认打开）
     def start_analysis(self):
         if not self.file_paths:
             messagebox.showwarning("警告", "请先选择文件")
@@ -568,6 +586,7 @@ class Application(tk.Tk):
         finally:
             self.after(100, self.process_queue)
 
+    # 合并文件
     def merge_only(self):
         out_dir = self.output_dir.get().strip()
         if not out_dir:
@@ -597,6 +616,7 @@ class Application(tk.Tk):
         except Exception as e:
             self.after(0, lambda: messagebox.showerror("错误", str(e)))
 
+    # 标签规则辅助
     def pick_color(self, entry):
         color = colorchooser.askcolor()[1]
         if color:
