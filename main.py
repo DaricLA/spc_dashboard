@@ -1,5 +1,5 @@
 """
-SPC 报告生成器 - SCT 分析，界面优化，莫兰迪配色，统一微软雅黑字体
+SPC 报告生成器 - SCT 分析，配置自动适配路径，错误提示完善
 """
 import tkinter as tk
 from tkinter import filedialog, ttk, messagebox, simpledialog, colorchooser
@@ -45,7 +45,7 @@ class Application(tk.Tk):
         self.minsize(700, 500)
         self.resizable(True, True)
 
-        # 全局默认字体设置
+        # 全局默认字体
         self.option_add("*Font", FONT_NORMAL)
         self.option_add("*Label.Font", FONT_NORMAL)
         self.option_add("*Button.Font", FONT_BOLD)
@@ -53,6 +53,8 @@ class Application(tk.Tk):
         self.file_paths = []
         self.header_rows = []
         self.output_dir = tk.StringVar()
+        self.output_dir.set("")  # 初始为空，选择文件后会自动设置
+
         self.value_configs = []
         self.label_rules = []
         self.all_configs = self._load_all_configs()
@@ -132,7 +134,6 @@ class Application(tk.Tk):
                                  bg=GREEN_BG, fg=GREEN_FG, height=1, state="disabled",
                                  font=FONT_BOLD)
         self.btn_gen.pack(side=tk.LEFT, padx=5)
-        # 拉伸空白
         tk.Frame(ctl_frm).pack(side=tk.LEFT, expand=True, fill=tk.X)
         tk.Button(ctl_frm, text="保存配置", command=self.save_config).pack(side=tk.LEFT, padx=5)
         tk.Button(ctl_frm, text="删除配置", command=self.delete_config).pack(side=tk.LEFT, padx=5)
@@ -164,7 +165,6 @@ class Application(tk.Tk):
         self.notebook.add(page3, text="Remark标签颜色规则")
         self.create_label_section(page3)
 
-        # 状态栏
         self.status = tk.Label(self, text="", fg="gray")
         self.status.pack(pady=(0,5))
 
@@ -328,8 +328,16 @@ class Application(tk.Tk):
         if name in self.all_configs:
             if not messagebox.askyesno("确认覆盖", f"配置 '{name}' 已存在，是否覆盖？"):
                 return
+        # 保存输出目录：若为自动模式（为空或与第一个文件目录相同且未手动更改），则存储 "__AUTO__"
+        current_dir = self.output_dir.get().strip()
+        auto_dir = os.path.dirname(self.file_paths[0]) if self.file_paths else ""
+        if not current_dir or (self.file_paths and current_dir == auto_dir):
+            output_value = "__AUTO__"
+        else:
+            output_value = current_dir
+
         config = {
-            'output_dir': self.output_dir.get(),
+            'output_dir': output_value,
             'sample_id': self.combo_sid.get(),
             'group': self.combo_grp.get(),
             'preprocess': {
@@ -365,7 +373,16 @@ class Application(tk.Tk):
             messagebox.showwarning("警告", "请先选择有效配置")
             return
         config = self.all_configs[name]
-        self.output_dir.set(config.get('output_dir', ''))
+        # 处理输出目录
+        output_val = config.get('output_dir', '')
+        if output_val == "__AUTO__":
+            # 自动模式：根据当前文件列表设置（若有文件）
+            if self.file_paths:
+                self.output_dir.set(os.path.dirname(self.file_paths[0]))
+            else:
+                self.output_dir.set("")  # 待用户选择文件后自动填充
+        else:
+            self.output_dir.set(output_val)
         self.combo_sid.set(config.get('sample_id', ''))
         self.combo_grp.set(config.get('group', ''))
         pp = config.get('preprocess', {})
@@ -428,7 +445,8 @@ class Application(tk.Tk):
         self.btn_gen.config(state="normal")
         self.btn_merge.config(state="normal")
         self.refresh_file_list()
-        if not self.output_dir.get():
+        # 自动设置输出目录（如果用户未手动更改过，或者配置是自动模式）
+        if not self.output_dir.get().strip() or self.output_dir.get() == "__AUTO__":
             self.output_dir.set(os.path.dirname(self.file_paths[0]))
         try:
             first = self.file_paths[0]
@@ -472,10 +490,19 @@ class Application(tk.Tk):
             messagebox.showwarning("警告", "请先选择文件")
             return
         out_dir = self.output_dir.get().strip()
+        # 如果输出目录为空（比如加载配置后还没选文件），让用户手动选择
         if not out_dir:
-            messagebox.showwarning("警告", "请设置输出目录")
+            messagebox.showinfo("提示", "请选择输出目录")
+            d = filedialog.askdirectory(title="选择输出目录")
+            if not d:
+                return
+            out_dir = d
+            self.output_dir.set(out_dir)
+        try:
+            os.makedirs(out_dir, exist_ok=True)
+        except Exception as e:
+            messagebox.showerror("错误", f"无法创建输出目录：{e}")
             return
-        os.makedirs(out_dir, exist_ok=True)
 
         self.progress_win = tk.Toplevel(self)
         self.progress_win.title("正在生成报告...")
@@ -597,9 +624,17 @@ class Application(tk.Tk):
     def merge_only(self):
         out_dir = self.output_dir.get().strip()
         if not out_dir:
-            messagebox.showwarning("警告", "请设置输出目录")
+            messagebox.showinfo("提示", "请选择输出目录")
+            d = filedialog.askdirectory(title="选择输出目录")
+            if not d:
+                return
+            out_dir = d
+            self.output_dir.set(out_dir)
+        try:
+            os.makedirs(out_dir, exist_ok=True)
+        except Exception as e:
+            messagebox.showerror("错误", f"无法创建输出目录：{e}")
             return
-        os.makedirs(out_dir, exist_ok=True)
         out_path = os.path.join(out_dir, f"merged_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
         self.status.config(text="合并中...")
         threading.Thread(target=self.run_merge, args=(out_path,), daemon=True).start()
