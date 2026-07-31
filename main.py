@@ -1,6 +1,5 @@
 """
-SPC 报告生成器 - SCT 分析，ttkbootstrap Flatly 主题，界面优化
-修复文件导入、窗口最小尺寸、输出路径管理
+SPC 报告生成器 - SCT 分析，ttkbootstrap Flatly 主题，完整修复
 """
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
@@ -16,8 +15,17 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 
-import core
-from report_generator import generate_html_report
+# 导入核心模块（确保路径正确）
+try:
+    import core
+    from report_generator import generate_html_report
+except ImportError as e:
+    # 在打包后可能路径不同，尝试添加当前目录到 sys.path
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    if current_dir not in sys.path:
+        sys.path.append(current_dir)
+    import core
+    from report_generator import generate_html_report
 
 def get_config_path():
     if getattr(sys, 'frozen', False):
@@ -38,7 +46,7 @@ class Application(ttk.Window):
         super().__init__(themename="flatly")
         self.title("SCT 分析报告生成器")
         self.geometry("780x680")
-        self.minsize(780, 680)          # 最小尺寸与默认一致，防止缩小
+        self.minsize(780, 680)
         self.resizable(True, True)
 
         style = self.style
@@ -319,7 +327,7 @@ class Application(ttk.Window):
         self.label_listbox.config(yscrollcommand=sc.set)
         ttk.Button(f, text="删除选中规则", command=self.delete_label_rule, style="outline").pack(pady=5)
 
-    # ---------- 配置管理（不再存储输出目录） ----------
+    # ---------- 配置管理（不存储输出路径） ----------
     def refresh_config_list(self):
         names = list(self.all_configs.keys())
         self.config_combo['values'] = names
@@ -335,7 +343,6 @@ class Application(ttk.Window):
         if name in self.all_configs:
             if not messagebox.askyesno("确认覆盖", f"配置 '{name}' 已存在，是否覆盖？"):
                 return
-        # 不保存 output_dir
         config = {
             'sample_id': self.combo_sid.get(),
             'group': self.combo_grp.get(),
@@ -372,7 +379,7 @@ class Application(ttk.Window):
             messagebox.showwarning("警告", "请先选择有效配置")
             return
         config = self.all_configs[name]
-        # 不恢复 output_dir，保持当前值
+        # 不再恢复输出目录
         self.combo_sid.set(config.get('sample_id', ''))
         self.combo_grp.set(config.get('group', ''))
         pp = config.get('preprocess', {})
@@ -436,7 +443,6 @@ class Application(ttk.Window):
         self.btn_gen.config(state="normal")
         self.btn_merge.config(state="normal")
         self.refresh_file_list()
-        # 自动设置输出目录（仅当用户未手动设置时）
         if not self.output_dir.get().strip():
             self.output_dir.set(os.path.dirname(self.file_paths[0]))
         try:
@@ -478,7 +484,6 @@ class Application(ttk.Window):
     def update_header_row(self, idx, val):
         self.header_rows[idx] = val
 
-    # ---------- 分析前检查输出目录 ----------
     def _ensure_output_dir(self):
         out_dir = self.output_dir.get().strip()
         if not out_dir:
