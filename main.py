@@ -172,20 +172,11 @@ class Application(ttk.Window):
         ttk.Button(ctl_frm, text="删除配置", command=self.delete_config,
                    style="outline").pack(side=LEFT, padx=3)
 
-        # ===== 第五行：笔记本区域（可滚动） =====
+        # ===== 第五行：笔记本区域 =====
         nb_container = ttk.Frame(self)
         nb_container.pack(fill=BOTH, expand=True, padx=10, pady=(0,5))
-        self.nb_canvas = tk.Canvas(nb_container, height=300, bg='white', highlightthickness=0)
-        self.nb_scrollbar = ttk.Scrollbar(nb_container, orient="vertical", command=self.nb_canvas.yview)
-        self.nb_frame = ttk.Frame(self.nb_canvas)
-        self.nb_frame.bind("<Configure>", lambda e: self.nb_canvas.configure(scrollregion=self.nb_canvas.bbox("all")))
-        self.nb_canvas.create_window((0,0), window=self.nb_frame, anchor="nw")
-        self.nb_canvas.configure(yscrollcommand=self.nb_scrollbar.set)
-        self.nb_canvas.pack(side=LEFT, fill=BOTH, expand=True)
-        self.nb_scrollbar.pack(side=RIGHT, fill=Y)
-        self._bind_mouse_wheel(self.nb_canvas, self.nb_frame)
 
-        self.notebook = ttk.Notebook(self.nb_frame)
+        self.notebook = ttk.Notebook(nb_container)
         self.notebook.pack(fill=BOTH, expand=True)
 
         page1 = ttk.Frame(self.notebook)
@@ -234,8 +225,17 @@ class Application(ttk.Window):
         ttk.Button(btn_frame, text="添加数值列", command=self.add_value_row, style="outline").pack(side=LEFT)
         ttk.Button(btn_frame, text="删除选中列", command=self.delete_value_row, style="outline").pack(side=LEFT, padx=5)
 
-        self.value_frame = ttk.Frame(f)
-        self.value_frame.pack(fill=BOTH, expand=True)
+        # 内部滚动区域，仅包裹数值列行
+        self.val_canvas = tk.Canvas(f, bg='white', highlightthickness=0)
+        self.val_scrollbar = ttk.Scrollbar(f, orient="vertical", command=self.val_canvas.yview)
+        self.value_frame = ttk.Frame(self.val_canvas)
+        self.value_frame.bind("<Configure>", lambda e: self.val_canvas.configure(scrollregion=self.val_canvas.bbox("all")))
+        self.val_canvas.create_window((0, 0), window=self.value_frame, anchor="nw")
+        self.val_canvas.configure(yscrollcommand=self.val_scrollbar.set)
+        self.val_canvas.pack(side=LEFT, fill=BOTH, expand=True)
+        self.val_scrollbar.pack(side=RIGHT, fill=Y)
+        self._bind_mouse_wheel(self.val_canvas, self.value_frame)
+
         self.value_rows = []
         self.add_value_row()
 
