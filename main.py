@@ -1,5 +1,5 @@
 """
-SPC 报告生成器 - SCT 分析，ttkbootstrap Flatly 主题，完整功能
+SPC 报告生成器 - SCT 分析，ttkbootstrap Flatly 主题，界面优化
 """
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
@@ -36,19 +36,24 @@ class Application(ttk.Window):
     def __init__(self):
         super().__init__(themename="flatly")
         self.title("SCT 分析报告生成器")
-        self.geometry("750x600")
-        self.minsize(700, 500)
+        self.geometry("780x680")          # 加大高度，避免控件重叠
+        self.minsize(700, 600)
         self.resizable(True, True)
 
-        # 全局字体样式
+        # 全局样式：背景白色、字体微软雅黑
         style = self.style
         style.configure('.', font=FONT_NORMAL)
+        style.configure('TFrame', background='white')
         style.configure('TButton', font=FONT_BOLD)
-        style.configure('TLabel', font=FONT_NORMAL)
+        style.configure('TLabel', font=FONT_NORMAL, background='white')
         style.configure('TEntry', font=FONT_NORMAL)
         style.configure('TCombobox', font=FONT_NORMAL)
-        style.configure('TCheckbutton', font=FONT_NORMAL)
-        style.configure('TLabelframe.Label', font=FONT_BOLD)
+        style.configure('TCheckbutton', font=FONT_NORMAL, background='white')
+        style.configure('TLabelframe.Label', font=FONT_BOLD, background='white')
+        style.configure('TLabelframe', background='white')
+        style.configure('TNotebook', background='white')
+        style.configure('TNotebook.Tab', font=FONT_BOLD)
+        self.configure(bg='white')
 
         self.file_paths = []
         self.header_rows = []
@@ -112,7 +117,7 @@ class Application(ttk.Window):
         list_cont = ttk.Frame(self, height=150)
         list_cont.pack(fill=X, padx=10, pady=5)
         list_cont.pack_propagate(False)
-        self.canvas = tk.Canvas(list_cont)
+        self.canvas = tk.Canvas(list_cont, bg='white', highlightthickness=0)
         self.scrollbar = ttk.Scrollbar(list_cont, orient="vertical", command=self.canvas.yview)
         self.scrollable_frame = ttk.Frame(self.canvas)
         self.scrollable_frame.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
@@ -133,17 +138,16 @@ class Application(ttk.Window):
         self.btn_gen = ttk.Button(ctl_frm, text="③ 生成SCT分析报告", command=self.start_analysis,
                                   style="info", state="disabled")
         self.btn_gen.pack(side=LEFT, padx=5)
-        # 空白占位
         ttk.Frame(ctl_frm).pack(side=LEFT, expand=True, fill=X)
         ttk.Button(ctl_frm, text="保存配置", command=self.save_config,
                    style="outline").pack(side=LEFT, padx=5)
         ttk.Button(ctl_frm, text="删除配置", command=self.delete_config,
                    style="outline").pack(side=LEFT, padx=5)
 
-        # ===== 第五行：笔记本区域（可滚动） =====
+        # ===== 第五行：笔记本区域（可滚动，增大高度） =====
         nb_container = ttk.Frame(self)
         nb_container.pack(fill=BOTH, expand=True, padx=10, pady=(0,5))
-        self.nb_canvas = tk.Canvas(nb_container, height=250, highlightthickness=0)
+        self.nb_canvas = tk.Canvas(nb_container, height=300, bg='white', highlightthickness=0)
         self.nb_scrollbar = ttk.Scrollbar(nb_container, orient="vertical", command=self.nb_canvas.yview)
         self.nb_frame = ttk.Frame(self.nb_canvas)
         self.nb_frame.bind("<Configure>", lambda e: self.nb_canvas.configure(scrollregion=self.nb_canvas.bbox("all")))
@@ -173,12 +177,12 @@ class Application(ttk.Window):
     def create_basic_section(self, parent):
         f = ttk.LabelFrame(parent, text="字段映射（必填）")
         f.pack(fill=X, padx=5, pady=5)
-        ttk.Label(f, text="样本ID列:").grid(row=0, column=0, sticky="e")
+        ttk.Label(f, text="样本ID列:").grid(row=0, column=0, sticky="e", padx=5, pady=2)
         self.combo_sid = ttk.Combobox(f, state="readonly", width=25)
-        self.combo_sid.grid(row=0, column=1, sticky="w")
-        ttk.Label(f, text="分组列:").grid(row=0, column=2, sticky="e")
+        self.combo_sid.grid(row=0, column=1, sticky="w", padx=5, pady=2)
+        ttk.Label(f, text="分组列:").grid(row=0, column=2, sticky="e", padx=5, pady=2)
         self.combo_grp = ttk.Combobox(f, state="readonly", width=25)
-        self.combo_grp.grid(row=0, column=3, sticky="w")
+        self.combo_grp.grid(row=0, column=3, sticky="w", padx=5, pady=2)
 
         pf = ttk.LabelFrame(parent, text="预处理")
         pf.pack(fill=X, padx=5, pady=5)
@@ -186,12 +190,12 @@ class Application(ttk.Window):
         self.var_del_dup = tk.BooleanVar(value=True)
         self.var_fillna = tk.StringVar(value="不处理")
         self.var_outlier = tk.DoubleVar(value=0.0)
-        ttk.Checkbutton(pf, text="删除全空行", variable=self.var_del_empty).grid(row=0, column=0, sticky="w")
-        ttk.Checkbutton(pf, text="删除重复样本ID", variable=self.var_del_dup).grid(row=0, column=1, sticky="w")
-        ttk.Label(pf, text="缺失值填充:").grid(row=0, column=2, sticky="e")
-        ttk.Combobox(pf, textvariable=self.var_fillna, values=["不处理","均值","中位数","删除该行"], width=8).grid(row=0, column=3, sticky="w")
-        ttk.Label(pf, text="异常值过滤(±σ):").grid(row=0, column=4, sticky="e")
-        ttk.Entry(pf, textvariable=self.var_outlier, width=5).grid(row=0, column=5, sticky="w")
+        ttk.Checkbutton(pf, text="删除全空行", variable=self.var_del_empty).grid(row=0, column=0, sticky="w", padx=5)
+        ttk.Checkbutton(pf, text="删除重复样本ID", variable=self.var_del_dup).grid(row=0, column=1, sticky="w", padx=5)
+        ttk.Label(pf, text="缺失值填充:").grid(row=0, column=2, sticky="e", padx=5)
+        ttk.Combobox(pf, textvariable=self.var_fillna, values=["不处理","均值","中位数","删除该行"], width=8).grid(row=0, column=3, sticky="w", padx=5)
+        ttk.Label(pf, text="异常值过滤(±σ):").grid(row=0, column=4, sticky="e", padx=5)
+        ttk.Entry(pf, textvariable=self.var_outlier, width=5).grid(row=0, column=5, sticky="w", padx=5)
 
     def create_value_col_section(self, parent):
         f = ttk.LabelFrame(parent, text="数值列管理（可添加多个）")
@@ -208,41 +212,46 @@ class Application(ttk.Window):
 
     def add_value_row(self):
         row_frame = ttk.Frame(self.value_frame, relief="ridge", borderwidth=1)
-        row_frame.pack(fill=X, pady=2)
-        ttk.Label(row_frame, text="数值列:").grid(row=0, column=0, sticky="e")
-        combo_val = ttk.Combobox(row_frame, state="readonly", width=20)
-        combo_val.grid(row=0, column=1, sticky="w")
+        row_frame.pack(fill=X, pady=3, padx=2, ipady=2)
+
+        # 数值列选择
+        ttk.Label(row_frame, text="数值列:").grid(row=0, column=0, sticky="e", padx=3, pady=2)
+        combo_val = ttk.Combobox(row_frame, state="readonly", width=18)
+        combo_val.grid(row=0, column=1, sticky="w", padx=3, pady=2)
         if hasattr(self, 'all_columns'):
             combo_val['values'] = self.all_columns
             if self.all_columns:
                 combo_val.current(0)
 
-        ttk.Label(row_frame, text="USL:").grid(row=0, column=2, sticky="e")
+        # USL
+        ttk.Label(row_frame, text="USL:").grid(row=0, column=2, sticky="e", padx=3, pady=2)
         usl_choice = tk.StringVar(value="手动")
-        ttk.Radiobutton(row_frame, text="列", variable=usl_choice, value="列").grid(row=0, column=3)
-        ttk.Radiobutton(row_frame, text="手动", variable=usl_choice, value="手动").grid(row=0, column=4)
-        combo_usl = ttk.Combobox(row_frame, state="readonly", width=10)
-        combo_usl.grid(row=0, column=5)
+        ttk.Radiobutton(row_frame, text="列", variable=usl_choice, value="列").grid(row=0, column=3, padx=2)
+        ttk.Radiobutton(row_frame, text="手动", variable=usl_choice, value="手动").grid(row=0, column=4, padx=2)
+        combo_usl = ttk.Combobox(row_frame, state="readonly", width=8)
+        combo_usl.grid(row=0, column=5, padx=2)
         entry_usl = ttk.Entry(row_frame, width=7)
-        entry_usl.grid(row=0, column=6)
+        entry_usl.grid(row=0, column=6, padx=2)
         usl_choice.trace_add('write', lambda *a, r=row_frame: self.toggle_spec_row(r))
 
-        ttk.Label(row_frame, text="LSL:").grid(row=1, column=2, sticky="e")
+        # LSL
+        ttk.Label(row_frame, text="LSL:").grid(row=1, column=2, sticky="e", padx=3, pady=2)
         lsl_choice = tk.StringVar(value="手动")
-        ttk.Radiobutton(row_frame, text="列", variable=lsl_choice, value="列").grid(row=1, column=3)
-        ttk.Radiobutton(row_frame, text="手动", variable=lsl_choice, value="手动").grid(row=1, column=4)
-        combo_lsl = ttk.Combobox(row_frame, state="readonly", width=10)
-        combo_lsl.grid(row=1, column=5)
+        ttk.Radiobutton(row_frame, text="列", variable=lsl_choice, value="列").grid(row=1, column=3, padx=2)
+        ttk.Radiobutton(row_frame, text="手动", variable=lsl_choice, value="手动").grid(row=1, column=4, padx=2)
+        combo_lsl = ttk.Combobox(row_frame, state="readonly", width=8)
+        combo_lsl.grid(row=1, column=5, padx=2)
         entry_lsl = ttk.Entry(row_frame, width=7)
-        entry_lsl.grid(row=1, column=6)
+        entry_lsl.grid(row=1, column=6, padx=2)
         lsl_choice.trace_add('write', lambda *a, r=row_frame: self.toggle_spec_row(r))
 
-        ttk.Label(row_frame, text="参考上限:").grid(row=2, column=0, sticky="e")
+        # 参考上下限
+        ttk.Label(row_frame, text="参考上限:").grid(row=2, column=0, sticky="e", padx=3, pady=2)
         entry_refu = ttk.Entry(row_frame, width=7)
-        entry_refu.grid(row=2, column=1)
-        ttk.Label(row_frame, text="参考下限:").grid(row=2, column=2, sticky="e")
+        entry_refu.grid(row=2, column=1, sticky="w", padx=3, pady=2)
+        ttk.Label(row_frame, text="参考下限:").grid(row=2, column=2, sticky="e", padx=3, pady=2)
         entry_refl = ttk.Entry(row_frame, width=7)
-        entry_refl.grid(row=2, column=3)
+        entry_refl.grid(row=2, column=3, sticky="w", padx=3, pady=2)
 
         row_data = {
             'frame': row_frame,
@@ -288,33 +297,33 @@ class Application(ttk.Window):
         f.pack(fill=BOTH, expand=True, padx=5, pady=5)
         ctrl = ttk.Frame(f)
         ctrl.pack(fill=X)
-        ttk.Label(ctrl, text="操作符:").pack(side=LEFT)
+        ttk.Label(ctrl, text="操作符:").pack(side=LEFT, padx=2)
         self.rule_op = ttk.Combobox(ctrl, values=["等于", "包含"], width=6)
         self.rule_op.current(0)
-        self.rule_op.pack(side=LEFT, padx=5)
-        ttk.Label(ctrl, text="匹配值:").pack(side=LEFT)
+        self.rule_op.pack(side=LEFT, padx=2)
+        ttk.Label(ctrl, text="匹配值:").pack(side=LEFT, padx=2)
         self.rule_match = ttk.Entry(ctrl, width=12)
-        self.rule_match.pack(side=LEFT, padx=5)
-        ttk.Label(ctrl, text="标签:").pack(side=LEFT)
+        self.rule_match.pack(side=LEFT, padx=2)
+        ttk.Label(ctrl, text="标签:").pack(side=LEFT, padx=2)
         self.rule_label = ttk.Entry(ctrl, width=12)
-        self.rule_label.pack(side=LEFT, padx=5)
-        ttk.Label(ctrl, text="颜色:").pack(side=LEFT)
+        self.rule_label.pack(side=LEFT, padx=2)
+        ttk.Label(ctrl, text="颜色:").pack(side=LEFT, padx=2)
         self.rule_color = ttk.Entry(ctrl, width=8)
         self.rule_color.insert(0, "orange")
-        self.rule_color.pack(side=LEFT, padx=5)
-        ttk.Button(ctrl, text="选色", command=lambda: self.pick_color(self.rule_color), style="outline").pack(side=LEFT)
-        ttk.Button(ctrl, text="添加", command=self.add_label_rule, style="outline").pack(side=LEFT, padx=5)
+        self.rule_color.pack(side=LEFT, padx=2)
+        ttk.Button(ctrl, text="选色", command=lambda: self.pick_color(self.rule_color), style="outline").pack(side=LEFT, padx=2)
+        ttk.Button(ctrl, text="添加", command=self.add_label_rule, style="outline").pack(side=LEFT, padx=2)
 
         list_f = ttk.Frame(f)
         list_f.pack(fill=BOTH, expand=True)
-        self.label_listbox = tk.Listbox(list_f, height=5, font=FONT_NORMAL)
+        self.label_listbox = tk.Listbox(list_f, height=5, font=FONT_NORMAL, bg='white')
         self.label_listbox.pack(side=LEFT, fill=BOTH, expand=True)
         sc = ttk.Scrollbar(list_f, orient="vertical", command=self.label_listbox.yview)
         sc.pack(side=RIGHT, fill=Y)
         self.label_listbox.config(yscrollcommand=sc.set)
         ttk.Button(f, text="删除选中规则", command=self.delete_label_rule, style="outline").pack(pady=5)
 
-    # ---------- 配置管理 ----------
+    # ---------- 配置管理（不变） ----------
     def refresh_config_list(self):
         names = list(self.all_configs.keys())
         self.config_combo['values'] = names
@@ -471,20 +480,24 @@ class Application(ttk.Window):
     def refresh_file_list(self):
         for w in self.scrollable_frame.winfo_children():
             w.destroy()
+        # 使用独立的变量保存每个文件的表头行号
+        self.file_vars = []
         for i, (f, h) in enumerate(zip(self.file_paths, self.header_rows)):
             frm = ttk.Frame(self.scrollable_frame)
             frm.pack(fill=X, pady=2)
             ttk.Label(frm, text="表头行:").pack(side=LEFT)
             var = tk.IntVar(value=h)
+            self.file_vars.append(var)
             sp = ttk.Spinbox(frm, from_=0, to=5, textvariable=var, width=3)
             sp.pack(side=LEFT)
-            sp.bind("<ButtonRelease-1>", lambda e, idx=i: self.update_header_row(idx, var.get()))
+            # 使用默认参数捕获当前索引 i
+            sp.bind("<ButtonRelease-1>", lambda e, idx=i: self.update_header_row(idx, self.file_vars[idx].get()))
             ttk.Label(frm, text=os.path.basename(f), anchor="w").pack(side=LEFT, padx=5)
 
     def update_header_row(self, idx, val):
         self.header_rows[idx] = val
 
-    # ---------- 分析逻辑 ----------
+    # ---------- 分析逻辑（不变） ----------
     def start_analysis(self):
         if not self.file_paths:
             messagebox.showwarning("警告", "请先选择文件")
@@ -658,7 +671,6 @@ class Application(ttk.Window):
         except Exception as e:
             self.after(0, lambda: messagebox.showerror("错误", str(e)))
 
-    # ---------- 标签规则辅助 ----------
     def pick_color(self, entry):
         color = colorchooser.askcolor()[1]
         if color:
