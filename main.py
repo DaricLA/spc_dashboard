@@ -1,5 +1,6 @@
 """
 SPC 报告生成器 - SCT 分析，ttkbootstrap Flatly 主题，界面优化
+修复文件导入、窗口最小尺寸、输出路径管理
 """
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
@@ -36,11 +37,10 @@ class Application(ttk.Window):
     def __init__(self):
         super().__init__(themename="flatly")
         self.title("SCT 分析报告生成器")
-        self.geometry("780x680")          # 加大高度，避免控件重叠
-        self.minsize(700, 600)
+        self.geometry("780x680")
+        self.minsize(780, 680)          # 最小尺寸与默认一致，防止缩小
         self.resizable(True, True)
 
-        # 全局样式：背景白色、字体微软雅黑
         style = self.style
         style.configure('.', font=FONT_NORMAL)
         style.configure('TFrame', background='white')
@@ -144,7 +144,7 @@ class Application(ttk.Window):
         ttk.Button(ctl_frm, text="删除配置", command=self.delete_config,
                    style="outline").pack(side=LEFT, padx=5)
 
-        # ===== 第五行：笔记本区域（可滚动，增大高度） =====
+        # ===== 第五行：笔记本区域（可滚动） =====
         nb_container = ttk.Frame(self)
         nb_container.pack(fill=BOTH, expand=True, padx=10, pady=(0,5))
         self.nb_canvas = tk.Canvas(nb_container, height=300, bg='white', highlightthickness=0)
@@ -214,7 +214,6 @@ class Application(ttk.Window):
         row_frame = ttk.Frame(self.value_frame, relief="ridge", borderwidth=1)
         row_frame.pack(fill=X, pady=3, padx=2, ipady=2)
 
-        # 数值列选择
         ttk.Label(row_frame, text="数值列:").grid(row=0, column=0, sticky="e", padx=3, pady=2)
         combo_val = ttk.Combobox(row_frame, state="readonly", width=18)
         combo_val.grid(row=0, column=1, sticky="w", padx=3, pady=2)
@@ -223,7 +222,6 @@ class Application(ttk.Window):
             if self.all_columns:
                 combo_val.current(0)
 
-        # USL
         ttk.Label(row_frame, text="USL:").grid(row=0, column=2, sticky="e", padx=3, pady=2)
         usl_choice = tk.StringVar(value="手动")
         ttk.Radiobutton(row_frame, text="列", variable=usl_choice, value="列").grid(row=0, column=3, padx=2)
@@ -234,7 +232,6 @@ class Application(ttk.Window):
         entry_usl.grid(row=0, column=6, padx=2)
         usl_choice.trace_add('write', lambda *a, r=row_frame: self.toggle_spec_row(r))
 
-        # LSL
         ttk.Label(row_frame, text="LSL:").grid(row=1, column=2, sticky="e", padx=3, pady=2)
         lsl_choice = tk.StringVar(value="手动")
         ttk.Radiobutton(row_frame, text="列", variable=lsl_choice, value="列").grid(row=1, column=3, padx=2)
@@ -245,7 +242,6 @@ class Application(ttk.Window):
         entry_lsl.grid(row=1, column=6, padx=2)
         lsl_choice.trace_add('write', lambda *a, r=row_frame: self.toggle_spec_row(r))
 
-        # 参考上下限
         ttk.Label(row_frame, text="参考上限:").grid(row=2, column=0, sticky="e", padx=3, pady=2)
         entry_refu = ttk.Entry(row_frame, width=7)
         entry_refu.grid(row=2, column=1, sticky="w", padx=3, pady=2)
@@ -323,7 +319,7 @@ class Application(ttk.Window):
         self.label_listbox.config(yscrollcommand=sc.set)
         ttk.Button(f, text="删除选中规则", command=self.delete_label_rule, style="outline").pack(pady=5)
 
-    # ---------- 配置管理（不变） ----------
+    # ---------- 配置管理（不再存储输出目录） ----------
     def refresh_config_list(self):
         names = list(self.all_configs.keys())
         self.config_combo['values'] = names
@@ -339,15 +335,8 @@ class Application(ttk.Window):
         if name in self.all_configs:
             if not messagebox.askyesno("确认覆盖", f"配置 '{name}' 已存在，是否覆盖？"):
                 return
-        current_dir = self.output_dir.get().strip()
-        auto_dir = os.path.dirname(self.file_paths[0]) if self.file_paths else ""
-        if not current_dir or (self.file_paths and current_dir == auto_dir):
-            output_value = "__AUTO__"
-        else:
-            output_value = current_dir
-
+        # 不保存 output_dir
         config = {
-            'output_dir': output_value,
             'sample_id': self.combo_sid.get(),
             'group': self.combo_grp.get(),
             'preprocess': {
@@ -383,14 +372,7 @@ class Application(ttk.Window):
             messagebox.showwarning("警告", "请先选择有效配置")
             return
         config = self.all_configs[name]
-        output_val = config.get('output_dir', '')
-        if output_val == "__AUTO__":
-            if self.file_paths:
-                self.output_dir.set(os.path.dirname(self.file_paths[0]))
-            else:
-                self.output_dir.set("")
-        else:
-            self.output_dir.set(output_val)
+        # 不恢复 output_dir，保持当前值
         self.combo_sid.set(config.get('sample_id', ''))
         self.combo_grp.set(config.get('group', ''))
         pp = config.get('preprocess', {})
@@ -454,7 +436,8 @@ class Application(ttk.Window):
         self.btn_gen.config(state="normal")
         self.btn_merge.config(state="normal")
         self.refresh_file_list()
-        if not self.output_dir.get().strip() or self.output_dir.get() == "__AUTO__":
+        # 自动设置输出目录（仅当用户未手动设置时）
+        if not self.output_dir.get().strip():
             self.output_dir.set(os.path.dirname(self.file_paths[0]))
         try:
             first = self.file_paths[0]
@@ -480,7 +463,6 @@ class Application(ttk.Window):
     def refresh_file_list(self):
         for w in self.scrollable_frame.winfo_children():
             w.destroy()
-        # 使用独立的变量保存每个文件的表头行号
         self.file_vars = []
         for i, (f, h) in enumerate(zip(self.file_paths, self.header_rows)):
             frm = ttk.Frame(self.scrollable_frame)
@@ -490,30 +472,35 @@ class Application(ttk.Window):
             self.file_vars.append(var)
             sp = ttk.Spinbox(frm, from_=0, to=5, textvariable=var, width=3)
             sp.pack(side=LEFT)
-            # 使用默认参数捕获当前索引 i
             sp.bind("<ButtonRelease-1>", lambda e, idx=i: self.update_header_row(idx, self.file_vars[idx].get()))
             ttk.Label(frm, text=os.path.basename(f), anchor="w").pack(side=LEFT, padx=5)
 
     def update_header_row(self, idx, val):
         self.header_rows[idx] = val
 
-    # ---------- 分析逻辑（不变） ----------
-    def start_analysis(self):
-        if not self.file_paths:
-            messagebox.showwarning("警告", "请先选择文件")
-            return
+    # ---------- 分析前检查输出目录 ----------
+    def _ensure_output_dir(self):
         out_dir = self.output_dir.get().strip()
         if not out_dir:
             messagebox.showinfo("提示", "请选择输出目录")
             d = filedialog.askdirectory(title="选择输出目录")
             if not d:
-                return
+                return None
             out_dir = d
             self.output_dir.set(out_dir)
         try:
             os.makedirs(out_dir, exist_ok=True)
+            return out_dir
         except Exception as e:
             messagebox.showerror("错误", f"无法创建输出目录：{e}")
+            return None
+
+    def start_analysis(self):
+        if not self.file_paths:
+            messagebox.showwarning("警告", "请先选择文件")
+            return
+        out_dir = self._ensure_output_dir()
+        if not out_dir:
             return
 
         self.progress_win = tk.Toplevel(self)
@@ -633,20 +620,9 @@ class Application(ttk.Window):
         finally:
             self.after(100, self.process_queue)
 
-    # ---------- 合并文件 ----------
     def merge_only(self):
-        out_dir = self.output_dir.get().strip()
+        out_dir = self._ensure_output_dir()
         if not out_dir:
-            messagebox.showinfo("提示", "请选择输出目录")
-            d = filedialog.askdirectory(title="选择输出目录")
-            if not d:
-                return
-            out_dir = d
-            self.output_dir.set(out_dir)
-        try:
-            os.makedirs(out_dir, exist_ok=True)
-        except Exception as e:
-            messagebox.showerror("错误", f"无法创建输出目录：{e}")
             return
         out_path = os.path.join(out_dir, f"merged_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
         self.status.config(text="合并中...")
