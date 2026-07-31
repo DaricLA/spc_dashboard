@@ -20,16 +20,21 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Build EXE
+      - name: Build EXE with PyInstaller
         run: |
           pyinstaller --onefile --windowed `
             --add-data "constants.py;." `
             --add-data "core.py;." `
             --add-data "report_generator.py;." `
-            --name SPC_Dashboard main.py
+            --hidden-import ttkbootstrap `
+            --hidden-import ttkbootstrap.style `
+            --hidden-import ttkbootstrap.constants `
+            --hidden-import streamlit.web.bootstrap `
+            --collect-all ttkbootstrap `
+            --name SCT_Dashboard main.py
 
-      - name: Upload artifact
+      - name: Upload EXE artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SPC_Dashboard_EXE
-          path: dist/SPC_Dashboard.exe
+          name: SCT_Dashboard_EXE
+          path: dist/SCT_Dashboard.exe
