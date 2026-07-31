@@ -138,19 +138,19 @@ class Application(ttk.Window):
         ctl_frm = ttk.Frame(self)
         ctl_frm.pack(fill=X, padx=10, pady=5)
         ttk.Label(ctl_frm, text="制程站位:").pack(side=LEFT)
-        self.config_combo = ttk.Combobox(ctl_frm, state="readonly", width=25)
-        self.config_combo.pack(side=LEFT, padx=5)
+        self.config_combo = ttk.Combobox(ctl_frm, state="readonly", width=18)
+        self.config_combo.pack(side=LEFT, padx=(2,5))
         self.refresh_config_list()
         ttk.Button(ctl_frm, text="② 加载站位配置", command=self.load_config,
-                   style="info").pack(side=LEFT, padx=5)
+                   style="info").pack(side=LEFT, padx=3)
         self.btn_gen = ttk.Button(ctl_frm, text="③ 生成SCT分析报告", command=self.start_analysis,
                                   style="info", state="disabled")
-        self.btn_gen.pack(side=LEFT, padx=5)
+        self.btn_gen.pack(side=LEFT, padx=3)
         ttk.Frame(ctl_frm).pack(side=LEFT, expand=True, fill=X)
         ttk.Button(ctl_frm, text="保存配置", command=self.save_config,
-                   style="outline").pack(side=LEFT, padx=5)
+                   style="outline").pack(side=LEFT, padx=3)
         ttk.Button(ctl_frm, text="删除配置", command=self.delete_config,
-                   style="outline").pack(side=LEFT, padx=5)
+                   style="outline").pack(side=LEFT, padx=3)
 
         # ===== 第五行：笔记本区域（可滚动） =====
         nb_container = ttk.Frame(self)
@@ -479,7 +479,7 @@ class Application(ttk.Window):
             sp = ttk.Spinbox(frm, from_=0, to=5, textvariable=var, width=3)
             sp.pack(side=LEFT)
             sp.bind("<ButtonRelease-1>", lambda e, idx=i: self.update_header_row(idx, self.file_vars[idx].get()))
-            ttk.Label(frm, text=os.path.basename(f), anchor="w").pack(side=LEFT, padx=5)
+            ttk.Label(frm, text=os.path.basename(f), anchor="w").pack(side=LEFT, padx=3)
 
     def update_header_row(self, idx, val):
         self.header_rows[idx] = val
