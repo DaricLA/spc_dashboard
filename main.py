@@ -102,6 +102,25 @@ class Application(ttk.Window):
         except Exception as e:
             messagebox.showerror("保存失败", f"无法写入配置文件：{e}")
 
+    def _bind_mouse_wheel(self, canvas, container):
+        """Bind mouse wheel scroll to a canvas and all its child widgets."""
+        def _on_mousewheel(event):
+            # On Windows, event.delta is in multiples of 120
+            if event.delta > 0:
+                canvas.yview_scroll(-1, "units")
+            elif event.delta < 0:
+                canvas.yview_scroll(1, "units")
+
+        def _bind_recursive(widget):
+            widget.bind("<MouseWheel>", _on_mousewheel)
+            for child in widget.winfo_children():
+                _bind_recursive(child)
+
+        canvas.bind("<MouseWheel>", _on_mousewheel)
+        container.bind("<MouseWheel>", _on_mousewheel)
+        for child in container.winfo_children():
+            _bind_recursive(child)
+
     def create_widgets(self):
         # ===== 第一行：文件选择 + 仅合并按钮 =====
         top1 = ttk.Frame(self)
@@ -133,6 +152,7 @@ class Application(ttk.Window):
         self.canvas.configure(yscrollcommand=self.scrollbar.set, height=150)
         self.canvas.pack(side=LEFT, fill=BOTH, expand=True)
         self.scrollbar.pack(side=RIGHT, fill=Y)
+        self._bind_mouse_wheel(self.canvas, self.scrollable_frame)
 
         # ===== 第四行：制程站位 + 操作按钮 =====
         ctl_frm = ttk.Frame(self)
@@ -163,6 +183,7 @@ class Application(ttk.Window):
         self.nb_canvas.configure(yscrollcommand=self.nb_scrollbar.set)
         self.nb_canvas.pack(side=LEFT, fill=BOTH, expand=True)
         self.nb_scrollbar.pack(side=RIGHT, fill=Y)
+        self._bind_mouse_wheel(self.nb_canvas, self.nb_frame)
 
         self.notebook = ttk.Notebook(self.nb_frame)
         self.notebook.pack(fill=BOTH, expand=True)
@@ -480,6 +501,8 @@ class Application(ttk.Window):
             sp.pack(side=LEFT)
             sp.bind("<ButtonRelease-1>", lambda e, idx=i: self.update_header_row(idx, self.file_vars[idx].get()))
             ttk.Label(frm, text=os.path.basename(f), anchor="w").pack(side=LEFT, padx=3)
+        # Rebind mouse wheel to newly created file list children
+        self._bind_mouse_wheel(self.canvas, self.scrollable_frame)
 
     def update_header_row(self, idx, val):
         self.header_rows[idx] = val
