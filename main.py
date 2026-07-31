@@ -45,8 +45,8 @@ class Application(ttk.Window):
     def __init__(self):
         super().__init__(themename="flatly")
         self.title("SCT 分析报告生成器")
-        self.geometry("780x680")
-        self.minsize(780, 680)
+        self.geometry("960x860")
+        self.minsize(960, 860)
         self.resizable(True, True)
 
         style = self.style
